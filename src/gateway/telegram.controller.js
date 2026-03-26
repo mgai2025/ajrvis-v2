@@ -35,7 +35,9 @@ if (token) {
  * Handle incoming Telegram Webhook payloads
  */
 const receiveMessage = async (req, res) => {
-    if (!bot) return res.sendStatus(200);
+    if (!bot) {
+        return res.status(500).json({ status: 'FATAL', reason: 'bot is null', token_exists: !!process.env.TELEGRAM_BOT_Token });
+    }
 
     try {
         const update = req.body;
@@ -55,12 +57,12 @@ const receiveMessage = async (req, res) => {
                 await bot.sendMessage(message.chat.id, responseText);
             }
         }
+        // Acknowledge completely at the END so the Lambda stays alive
+        return res.status(200).json({ status: 'SUCCESS', message: responseText });
     } catch (error) {
         console.error('Error processing Telegram webhook payload:', error);
+        return res.status(500).json({ status: 'ERROR', error: error.message, stack: error.stack });
     }
-
-    // Acknowledge completely at the END so the Lambda stays alive
-    res.sendStatus(200);
 };
 
 /**
