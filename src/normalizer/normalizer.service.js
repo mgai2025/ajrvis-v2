@@ -62,15 +62,15 @@ class InputNormalizer {
         }
 
         return {
-            event_id: String(message.message_id),
+            event_id: String(message.message_id || Date.now()),
             user_phone: pseudoPhone, // Used as unique identifier
             channel: 'telegram',
             content_type: contentType,
             raw_text: rawText,
-            timestamp: new Date(message.date * 1000).toISOString(),
+            timestamp: message.date ? new Date(message.date * 1000).toISOString() : new Date().toISOString(),
             metadata: { 
-                chat_id: message.chat.id,
-                username: message.from.username 
+                chat_id: message.chat ? message.chat.id : null,
+                username: message.from ? message.from.username : null 
             }
         };
     }

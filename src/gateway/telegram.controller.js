@@ -41,6 +41,7 @@ const receiveMessage = async (req, res) => {
 
     try {
         const update = req.body;
+        let responseText = null;
         
         if (update.message) {
             const message = update.message;
@@ -50,7 +51,7 @@ const receiveMessage = async (req, res) => {
             const inputEvent = normalizer.fromTelegram(message);
 
             // MUST await this entirely BEFORE sending the 200 OK, otherwise Vercel freezes the function!
-            const responseText = await orchestrator.routeMessage(inputEvent);
+            responseText = await orchestrator.routeMessage(inputEvent);
 
             // Send response back via Telegram
             if (responseText) {
