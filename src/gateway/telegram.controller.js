@@ -9,10 +9,11 @@ const token = process.env.TELEGRAM_BOT_Token;
 
 let bot = null;
 if (token) {
-    // For local development, we use 'polling: true' so you don't need ngrok or port forwarding.
-    bot = new TelegramBot(token, { polling: true }); 
+    // Disable polling aggressively on Vercel to prevent infinite socket hanging
+    const isVercel = !!process.env.VERCEL;
+    bot = new TelegramBot(token, { polling: !isVercel }); 
     
-    // Listen for messages if we are polling
+    // Listen for messages if we are polling locally
     bot.on('message', async (msg) => {
         console.log('Received Telegram message:', msg.text);
         try {
@@ -34,16 +35,11 @@ if (token) {
  * Handle incoming Telegram Webhook payloads
  */
 const receiveMessage = async (req, res) => {
-    // 1. Acknowledge immediately
-    res.sendStatus(200);
-
-    if (!bot) return;
+    if (!bot) return res.sendStatus(200);
 
     try {
         const update = req.body;
         
-        // Let node-telegram-bot-api parse the update 
-        // We can just manually process the message directly to match architecture
         if (update.message) {
             const message = update.message;
             console.log('Received Telegram message:', message.text);
@@ -51,7 +47,7 @@ const receiveMessage = async (req, res) => {
             // Normalize input
             const inputEvent = normalizer.fromTelegram(message);
 
-            // Send to Orchestrator
+            // MUST await this entirely BEFORE sending the 200 OK, otherwise Vercel freezes the function!
             const responseText = await orchestrator.routeMessage(inputEvent);
 
             // Send response back via Telegram
@@ -62,6 +58,9 @@ const receiveMessage = async (req, res) => {
     } catch (error) {
         console.error('Error processing Telegram webhook payload:', error);
     }
+
+    // Acknowledge completely at the END so the Lambda stays alive
+    res.sendStatus(200);
 };
 
 /**
