@@ -8,6 +8,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 class LLMService {
     constructor() {
         this.provider = process.env.LLM_PROVIDER || 'mixed';
+        this.isDevMode = process.env.DEVELOPMENT_MODE === 'true';
 
         const geminiApiKey = process.env.GEMINI_API_KEY;
         const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
@@ -24,18 +25,20 @@ class LLMService {
         // Initialize Claude
         if (anthropicApiKey && anthropicApiKey !== 'your_anthropic_key') {
             this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+            this.claudeSonnet = "claude-sonnet-4-6";
+            this.claudeHaiku = process.env.CLAUDE_HAIKU_ID || "claude-3-haiku-20240307";
         } else {
-            console.warn('ANTHROPIC_API_KEY is not set. Claude Primary Engine disabled.');
+            console.warn('ANTHROPIC_API_KEY is not set. Claude Engine disabled.');
         }
     }
 
     /**
-     * Unifies the prompt generation for Claude 3.5 Sonnet
+     * Unifies the prompt generation for Claude models
      */
-    async _callClaude(prompt) {
+    async _callClaude(prompt, modelId) {
         if (!this.anthropic) throw new Error("Claude SDK not instantiated.");
         const msg = await this.anthropic.messages.create({
-            model: "claude-sonnet-4-6",
+            model: modelId,
             max_tokens: 1024,
             messages: [{ role: "user", content: prompt }]
         });
@@ -53,26 +56,36 @@ class LLMService {
     }
 
     /**
-     * The Master Architectural Waterfall. Attempts all three APIs sequentially!
+     * The Master Architectural Waterfall.
+     * In Dev Mode: Haiku -> Flash -> Pro -> Sonnet (Fastest/Cheapest First)
+     * In Prod Mode: Sonnet -> Pro -> Flash (Smartest First)
      */
     async _waterfall(prompt) {
-        try {
-            console.log("[LLM Waterfall] Attempting Claude 3.5 Sonnet...");
-            return await this._callClaude(prompt);
-        } catch (e1) {
-            console.error(`[LLM Waterfall] Claude Failed (${e1.message}) -> Degrading to Gemini 1.5 Pro`);
+        const queue = this.isDevMode 
+            ? [
+                { id: 'haiku', type: 'claude', name: this.claudeHaiku },
+                { id: 'flash', type: 'gemini', name: 'gemini-1.5-flash' },
+                { id: 'pro', type: 'gemini', name: 'gemini-1.5-pro' },
+                { id: 'sonnet', type: 'claude', name: this.claudeSonnet }
+              ]
+            : [
+                { id: 'sonnet', type: 'claude', name: this.claudeSonnet },
+                { id: 'pro', type: 'gemini', name: 'gemini-1.5-pro' },
+                { id: 'flash', type: 'gemini', name: 'gemini-1.5-flash' }
+              ];
+
+        for (const model of queue) {
             try {
-                return await this._callGemini(prompt, "gemini-1.5-pro");
-            } catch (e2) {
-                console.error(`[LLM Waterfall] Gemini Pro Failed (${e2.message}) -> Degrading to Gemini 1.5 Flash`);
-                try {
-                    return await this._callGemini(prompt, "gemini-1.5-flash");
-                } catch (e3) {
-                    console.error(`[LLM Waterfall] TOTAL OUTAGE. All engines failed.`);
-                    throw new Error("Waterfall Depletion");
-                }
+                console.log(`[LLM Waterfall] Attempting ${model.id} (${model.name})...`);
+                if (model.type === 'claude') return await this._callClaude(prompt, model.name);
+                if (model.type === 'gemini') return await this._callGemini(prompt, model.name);
+            } catch (e) {
+                console.warn(`[LLM Waterfall] ${model.id} Request Failed (${e.message}). Falling back...`);
             }
         }
+
+        console.error("[LLM Waterfall] TOTAL OUTAGE. All engines in the queue failed.");
+        throw new Error("Waterfall Depletion");
     }
 
     /**
@@ -167,7 +180,7 @@ GOAL: "${goalText}"`;
 
         const prompt = `SYSTEM: You are Ajrvis, the elite AI Chief of Staff strictly managing an Indian household. 
 The user just sent a message that is conversational small-talk or a general question (not a specific operational task like delegating to a maid).
-Reply naturally, gracefully, and concisely (1-2 sentences maximum).
+Reply naturally, gracefully, and EXTREMELY CONCISELY (Maximum 20 words).
 
 USER CONTEXT:
 Name: ${userContext.name || 'Unknown'}
