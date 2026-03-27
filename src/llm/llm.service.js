@@ -16,8 +16,8 @@ class LLMService {
         // Initialize Gemini
         if (geminiApiKey) {
             this.genAI = new GoogleGenerativeAI(geminiApiKey);
-            this.geminiPro = this.genAI.getGenerativeModel({ model: "gemini-1.5-pro-002" });
-            this.geminiFlash = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash-002" });
+            this.geminiPro = this.genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+            this.geminiFlash = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         } else {
             console.warn('GEMINI_API_KEY is not set in .env. Gemini Fallbacks disabled.');
         }
@@ -64,14 +64,14 @@ class LLMService {
         const queue = this.isDevMode 
             ? [
                 { id: 'haiku', type: 'claude', name: this.claudeHaiku },
-                { id: 'flash', type: 'gemini', name: 'gemini-1.5-flash' },
-                { id: 'pro', type: 'gemini', name: 'gemini-1.5-pro' },
+                { id: 'flash', type: 'gemini', name: 'gemini-2.5-flash' },
+                { id: 'pro', type: 'gemini', name: 'gemini-2.5-pro' },
                 { id: 'sonnet', type: 'claude', name: this.claudeSonnet }
               ]
             : [
                 { id: 'sonnet', type: 'claude', name: this.claudeSonnet },
-                { id: 'pro', type: 'gemini', name: 'gemini-1.5-pro' },
-                { id: 'flash', type: 'gemini', name: 'gemini-1.5-flash' }
+                { id: 'pro', type: 'gemini', name: 'gemini-2.5-pro' },
+                { id: 'flash', type: 'gemini', name: 'gemini-2.5-flash' }
               ];
 
         for (const model of queue) {
