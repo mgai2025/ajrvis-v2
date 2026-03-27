@@ -1,127 +1,135 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Anthropic = require('@anthropic-ai/sdk');
 
 /**
- * Handles communication with the LLM APIs (Gemini/Claude).
- * Currently hardcoded to Gemini for dev per PRD.
+ * Service to orchestrate interactions with LLMs (Claude & Gemini).
+ * Utilizing an elite Architectural Waterfall: Claude 3.5 -> Gemini 2.5 Pro -> Gemini 1.5 Flash
  */
 class LLMService {
     constructor() {
-        this.provider = process.env.LLM_PROVIDER || 'gemini';
+        this.provider = process.env.LLM_PROVIDER || 'mixed';
         
-        if (this.provider === 'gemini') {
-            const apiKey = process.env.GEMINI_API_KEY;
-            if (!apiKey) {
-                console.warn('GEMINI_API_KEY is not set in .env. LLM calls will fail.');
-            }
-            this.genAI = new GoogleGenerativeAI(apiKey || 'uninitialized');
-            // Initialize model with 1.5-flash for massive 1500/day free-tier quota (2.5 is aggressively rate limited)
-            this.intentModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-            // Gemini Pro was throwing strict Quota Failures on free keys, so we'll route planning to Flash as well for testing!
-            this.planningModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
+        const geminiApiKey = process.env.GEMINI_API_KEY;
+        const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
+        // Initialize Gemini
+        if (geminiApiKey) {
+            this.genAI = new GoogleGenerativeAI(geminiApiKey);
+            this.gemini25 = this.genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+            this.gemini15 = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        } else {
+            console.warn('GEMINI_API_KEY is not set in .env. Gemini Fallbacks disabled.');
+        }
+
+        // Initialize Claude
+        if (anthropicApiKey && anthropicApiKey !== 'your_anthropic_key') {
+            this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+        } else {
+            console.warn('ANTHROPIC_API_KEY is not set. Claude Primary Engine disabled.');
         }
     }
 
     /**
-     * Parse raw WhatsApp text into structured intent
-     * PRD 7.2 Intent Classification
+     * Unifies the prompt generation for Claude 3.5 Sonnet
+     */
+    async _callClaude(prompt) {
+        if (!this.anthropic) throw new Error("Claude SDK not instantiated.");
+        const msg = await this.anthropic.messages.create({
+            model: "claude-3-5-sonnet-20240620",
+            max_tokens: 1500,
+            messages: [{ role: "user", content: prompt }]
+        });
+        return msg.content[0].text.trim();
+    }
+
+    /**
+     * Unifies the prompt generation for Google Gemini models
+     */
+    async _callGemini(prompt, modelType) {
+        if (!this.genAI) throw new Error("Gemini SDK not instantiated.");
+        const targetModel = modelType === 'gemini-1.5-flash' ? this.gemini15 : this.gemini25;
+        const result = await targetModel.generateContent(prompt);
+        return result.response.text().trim();
+    }
+
+    /**
+     * The Master Architectural Waterfall. Attempts all three APIs sequentially!
+     */
+    async _waterfall(prompt) {
+        try {
+            console.log("[LLM Waterfall] Attempting Claude 3.5 Sonnet...");
+            return await this._callClaude(prompt);
+        } catch (e1) {
+            console.error(`[LLM Waterfall] Claude Failed (${e1.message}) -> Degrading to Gemini 2.5 Pro`);
+            try {
+                return await this._callGemini(prompt, "gemini-2.5-pro");
+            } catch (e2) {
+                console.error(`[LLM Waterfall] Gemini 2.5 Failed (${e2.message}) -> Degrading to Gemini 1.5 Flash`);
+                try {
+                    return await this._callGemini(prompt, "gemini-1.5-flash");
+                } catch (e3) {
+                    console.error(`[LLM Waterfall] TOTAL OUTAGE. All engines failed.`);
+                    throw new Error("Waterfall Depletion");
+                }
+            }
+        }
+    }
+
+    /**
+     * The unified intent classification model
      */
     async classifyIntent(text, userContext = {}) {
-        if (!this.genAI) return this._mockIntent(text);
+        if (!this.genAI && !this.anthropic) {
+            return this._mockIntent(text);
+        }
 
-        const prompt = `SYSTEM: You are a strict JSON intent classifier for an Indian household AI assistant. 
-Extract intent and entities. Output ONLY valid JSON. No explanation. No preamble.
-
+        const prompt = `SYSTEM: You are Ajrvis, a highly intelligent Chief of Staff AI managing an Indian household...
 CURRENT UTC TIME: ${new Date().toISOString()}
 
 VALID INTENTS: create_task | create_event | add_provider | provider_exception | delegate_provider_task | school_event | complex_goal | query_tasks | query_providers | approve_action | reject_action | cancel_task | conversational | out_of_scope
 
 INJECTED CONTEXT: 
 User Name: ${userContext.name || 'Unknown'}
-Providers: ${JSON.stringify(userContext.providers || [])}
 Children: ${JSON.stringify(userContext.children || [])}
+Domestic Providers: ${JSON.stringify(userContext.providers || [])}
 
-EXTRACTION RULES:
-1. If a monetary amount is mentioned in a task (e.g. "105" or "Rs 3000"), extract it strictly into the "amount" integer field, and REMOVE it from the "title".
-2. Any message implying a chore, bill payment, reminder, or pending action (e.g., "Mobile bill payment", "Car service next week") MUST be classified as the intent "create_task" even if it lacks explicit verbs like "Pay" or "Remind".
-3. Any message requesting to assign a task to a helper (e.g. "Tell cook to make pasta") MUST be classified as "delegate_provider_task".
-4. Any message reporting a helper's absence (e.g. "Maid took half day") MUST be classified as "provider_exception".
+Given the following message from the user, output exactly a JSON object defining the intent, confidence (0.0 - 1.0), detected language (e.g. 'en', 'hi'), and extracted entities natively.
+DO NOT use markdown backticks in the final output. Pure raw JSON exclusively.
 
 USER MESSAGE: "${text}"
 
-OUTPUT SCHEMA:
-{ 
-  "intent": "string", 
-  "confidence": 0.0, 
-  "language": "hi|en|hinglish", 
-  "entities": { 
-      "title": "string", 
-      "due_date": "ISO8601 UTC date string only string e.g. 2026-03-26T10:00:00Z. DO NOT USE WORDS LIKE TOMORROW", 
-      "priority": "low|medium|high", 
-      "provider_name": "string", 
-      "status": "absent|half_day|extra_day", 
-      "amount": number, 
-      "needs_decomposition": boolean, 
-      "assigned_to": "string" 
-  } 
-}`;
+EXPECTED FORMAT:
+{"intent": "...", "confidence": 0.0, "language": "...", "entities": {}}`;
 
         try {
-            const result = await this.intentModel.generateContent(prompt);
-            const responseText = result.response.text();
-            
-            // Clean up backticks if model generated them
-            const cleanJson = responseText.replace(/```json\n/g, '').replace(/```\n?/g, '').trim();
-            
-            return JSON.parse(cleanJson);
-        } catch (error) {
-            console.error('LLM Intent Classification Error:', error);
-            // Fallback for safety
-            return {
-                intent: 'unknown',
-                confidence: 0,
-                language: 'en',
-                entities: {}
-            };
+            const rawOutput = await this._waterfall(prompt);
+            const pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
+            return JSON.parse(pureJson);
+        } catch (e) {
+            console.error("LLM Intent Classification Exception:", e);
+            return { intent: 'unknown', confidence: 0, language: 'en', entities: {} };
         }
     }
 
     /**
-     * Decomposes complex mandates (Goal Engine)
-     * PRD 7.3 Goal Decomposition
+     * Goal Decomposition (Sprint 2 - Complex Task Planning)
      */
-    async decomposeGoal(text) {
-        if (!this.genAI) return this._mockDecomposition(text);
+    async breakDownGoal(goalText) {
+        if (!this.genAI && !this.anthropic) return [];
 
-        const prompt = `SYSTEM: You are a task decomposition engine. Break complex household mandates into structured execution plans. Output ONLY valid JSON.
+        const prompt = `SYSTEM: You break down complex household or parenting goals into a sequence of 3 to 7 specific, actionable sub-tasks.
+Return exactly a RAW JSON array of objects. No markdown ticks.
+Format: [{"title": "task title", "deadline_offset_days": number_or_null, "priority": "high|medium|low", "assignee_type": "user|provider"}]
 
-RULES: Max 5 tasks. Max 5 subtasks per task. Classify each subtask as autonomous (safe to do immediately) or approval_required (needs user yes before execution). 
-Autonomous = drafting text, setting reminders, creating calendar events, web search. 
-Approval_required = sending messages to others, spending money, placing orders.
+GOAL: "${goalText}"`;
 
-USER MESSAGE: "${text}"
-
-OUTPUT SCHEMA: 
-{ 
-  "goal_title": "string", 
-  "tasks": [{ 
-      "title": "string", 
-      "type": "string", 
-      "subtasks": [{ 
-          "title": "string", 
-          "execution_type": "autonomous|approval_required", 
-          "action_type": "string", 
-          "action_params": {} 
-      }] 
-  }] 
-}`;
-        
         try {
-            const result = await this.planningModel.generateContent(prompt);
-            const jsonText = result.response.text().replace(/```json\n/g, '').replace(/```\n?/g, '').trim();
-            return JSON.parse(jsonText);
-        } catch (error) {
-            console.error('LLM Decomposition Error:', error);
-            return { goal_title: text, tasks: [] };
+            const rawOutput = await this._waterfall(prompt);
+            const pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
+            return JSON.parse(pureJson);
+        } catch (e) {
+            console.error("LLM Goal Breakdown Error:", e);
+            return [];
         }
     }
 
@@ -129,7 +137,7 @@ OUTPUT SCHEMA:
      * Extracts Family or Provider profiles during Onboarding
      */
     async extractEntities(text, type) {
-        if (!this.genAI) return [];
+        if (!this.genAI && !this.anthropic) return [];
         
         let prompt = '';
         if (type === 'family') {
@@ -141,9 +149,9 @@ OUTPUT SCHEMA:
         }
         
         try {
-            const result = await this.intentModel.generateContent(prompt);
-            const rawOutput = result.response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-            return JSON.parse(rawOutput);
+            const rawOutput = await this._waterfall(prompt);
+            const pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
+            return JSON.parse(pureJson);
         } catch (e) { 
             console.error(`LLM Entity Extraction Error (${type}):`, e);
             return type === 'name' ? { name: text } : []; 
@@ -155,7 +163,7 @@ OUTPUT SCHEMA:
      * Prevents the structural LLM from throwing "Out of Scope" on small talk.
      */
     async generateConversationalResponse(text, userContext = {}) {
-        if (!this.genAI) return "I am currently offline, but how can I help you today?";
+        if (!this.genAI && !this.anthropic) return "I am currently offline, but how can I help you today?";
 
         const prompt = `SYSTEM: You are Ajrvis, the elite AI Chief of Staff strictly managing an Indian household. 
 The user just sent a message that is conversational small-talk or a general question (not a specific operational task like delegating to a maid).
@@ -171,8 +179,7 @@ USER MESSAGE: "${text}"
 Reply directly to the user respectfully:`;
 
         try {
-            const result = await this.intentModel.generateContent(prompt);
-            return result.response.text().trim();
+            return await this._waterfall(prompt);
         } catch (e) {
             console.error("Conversational LLM Error:", e);
             return "I apologize, I'm processing a lot of tasks right now. Can I help you with anything specific?";
@@ -180,19 +187,7 @@ Reply directly to the user respectfully:`;
     }
 
     _mockIntent(text) {
-        return {
-            intent: 'create_task',
-            confidence: 0.99,
-            language: 'en',
-            entities: { title: 'Mock Task', due_date: 'tomorrow' }
-        };
-    }
-
-    _mockDecomposition(text) {
-        return {
-            goal_title: 'Mock Goal',
-            tasks: []
-        };
+        return { intent: 'create_task', confidence: 0.9, language: 'en', entities: { title: "Mock task: " + text, due_date: null } };
     }
 }
 
