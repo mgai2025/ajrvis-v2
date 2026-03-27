@@ -14,8 +14,8 @@ class LLMService {
                 console.warn('GEMINI_API_KEY is not set in .env. LLM calls will fail.');
             }
             this.genAI = new GoogleGenerativeAI(apiKey || 'uninitialized');
-            // Gemini Flash for fast intent routing
-            this.intentModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+            // Initialize model with 1.5-flash for massive 1500/day free-tier quota (2.5 is aggressively rate limited)
+            this.intentModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
             // Gemini Pro was throwing strict Quota Failures on free keys, so we'll route planning to Flash as well for testing!
             this.planningModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
         }
