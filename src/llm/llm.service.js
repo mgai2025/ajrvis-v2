@@ -8,15 +8,15 @@ const Anthropic = require('@anthropic-ai/sdk');
 class LLMService {
     constructor() {
         this.provider = process.env.LLM_PROVIDER || 'mixed';
-        
+
         const geminiApiKey = process.env.GEMINI_API_KEY;
         const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
         // Initialize Gemini
         if (geminiApiKey) {
             this.genAI = new GoogleGenerativeAI(geminiApiKey);
-            this.gemini25 = this.genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
-            this.gemini15 = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            this.geminiPro = this.genAI.getGenerativeModel({ model: "gemini-1.5-pro-002" });
+            this.geminiFlash = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash-002" });
         } else {
             console.warn('GEMINI_API_KEY is not set in .env. Gemini Fallbacks disabled.');
         }
@@ -35,8 +35,8 @@ class LLMService {
     async _callClaude(prompt) {
         if (!this.anthropic) throw new Error("Claude SDK not instantiated.");
         const msg = await this.anthropic.messages.create({
-            model: "claude-3-5-sonnet-20240620",
-            max_tokens: 1500,
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: 1024,
             messages: [{ role: "user", content: prompt }]
         });
         return msg.content[0].text.trim();
@@ -47,7 +47,7 @@ class LLMService {
      */
     async _callGemini(prompt, modelType) {
         if (!this.genAI) throw new Error("Gemini SDK not instantiated.");
-        const targetModel = modelType === 'gemini-1.5-flash' ? this.gemini15 : this.gemini25;
+        const targetModel = modelType === 'gemini-1.5-flash' ? this.geminiFlash : this.geminiPro;
         const result = await targetModel.generateContent(prompt);
         return result.response.text().trim();
     }
@@ -60,11 +60,11 @@ class LLMService {
             console.log("[LLM Waterfall] Attempting Claude 3.5 Sonnet...");
             return await this._callClaude(prompt);
         } catch (e1) {
-            console.error(`[LLM Waterfall] Claude Failed (${e1.message}) -> Degrading to Gemini 2.5 Pro`);
+            console.error(`[LLM Waterfall] Claude Failed (${e1.message}) -> Degrading to Gemini 1.5 Pro`);
             try {
-                return await this._callGemini(prompt, "gemini-2.5-pro");
+                return await this._callGemini(prompt, "gemini-1.5-pro");
             } catch (e2) {
-                console.error(`[LLM Waterfall] Gemini 2.5 Failed (${e2.message}) -> Degrading to Gemini 1.5 Flash`);
+                console.error(`[LLM Waterfall] Gemini Pro Failed (${e2.message}) -> Degrading to Gemini 1.5 Flash`);
                 try {
                     return await this._callGemini(prompt, "gemini-1.5-flash");
                 } catch (e3) {
@@ -138,7 +138,7 @@ GOAL: "${goalText}"`;
      */
     async extractEntities(text, type) {
         if (!this.genAI && !this.anthropic) return [];
-        
+
         let prompt = '';
         if (type === 'family') {
             prompt = `SYSTEM: You extract family members from text. Output STRICTLY a RAW JSON array of objects. No markdown formatting. [{"name": "name", "role": "spouse|child|parent", "age": null_or_number}]\nUSER: "${text}"`;
@@ -147,14 +147,14 @@ GOAL: "${goalText}"`;
         } else if (type === 'name') {
             prompt = `SYSTEM: You extract the user's explicit real name from text. Output STRICTLY a RAW JSON object. No markdown formatting. {"name": "Cleaned First & Last Name"}\nUSER: "${text}"`;
         }
-        
+
         try {
             const rawOutput = await this._waterfall(prompt);
             const pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
             return JSON.parse(pureJson);
-        } catch (e) { 
+        } catch (e) {
             console.error(`LLM Entity Extraction Error (${type}):`, e);
-            return type === 'name' ? { name: text } : []; 
+            return type === 'name' ? { name: text } : [];
         }
     }
 
