@@ -22,6 +22,7 @@ app.use('/webhook', gatewayRoutes);
 const PORT = process.env.PORT || 3000;
 
 const configService = require('./config/config.service');
+const { initScheduler } = require('./scheduler/index');
 
 // Prevent `app.listen` from crashing Vercel Serverless Functions
 if (!process.env.VERCEL) {
@@ -29,6 +30,7 @@ if (!process.env.VERCEL) {
         console.log(`Ajrvis Backend Gateway running on port ${PORT}`);
         
         // --- AUTOMATED SCHEDULER ---
+        initScheduler();
         const HOURLY_MS = 60 * 60 * 1000;
         setInterval(async () => {
             console.log('[Scheduler] Running hourly Google Sheets sync...');

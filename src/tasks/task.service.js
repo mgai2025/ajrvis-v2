@@ -1,4 +1,5 @@
 const { executeDbQuery, supabase } = require('../shared/db');
+const CONSTANTS = require('../config/constants');
 
 class TaskService {
     
@@ -60,8 +61,18 @@ class TaskService {
             }]).select().single()
         );
 
+        // Determine dynamic reminder schedule based on Task duration
+        const nowMs = Date.now();
+        const dueMs = new Date(dueDate).getTime();
+        const diffHours = (dueMs - nowMs) / (1000 * 60 * 60);
+
+        let schedule = CONSTANTS.REMINDER_SCHEDULES.LONG_TERM;
+        if (diffHours < 2) schedule = CONSTANTS.REMINDER_SCHEDULES.SHORT_TERM;
+        else if (diffHours <= 24) schedule = CONSTANTS.REMINDER_SCHEDULES.DAILY;
+        else if (diffHours <= 168) schedule = CONSTANTS.REMINDER_SCHEDULES.MULTI_DAY;
+
         // Generate Reminders
-        await this.generateReminders(newTask.id, new Date(dueDate), taskData.reminder_pattern || [1, 0]);
+        await this.generateReminders(newTask.id, new Date(dueDate), schedule);
 
         return {
             status: 'created',
@@ -70,9 +81,9 @@ class TaskService {
     }
 
     /**
-     * Generates reminders based on a pattern of days before the due date
+     * Generates reminders based on a pattern of minute offsets relative to the due date
      */
-    async generateReminders(taskId, dueDateObj, daysBeforeArray) {
+    async generateReminders(taskId, dueDateObj, minutesOffsetArray) {
         if (!supabase) return;
         
         // Safety fallback if the LLM returned a bad date string
@@ -81,22 +92,44 @@ class TaskService {
             dueDateObj.setDate(dueDateObj.getDate() + 1); // fallback to tomorrow
         }
 
-        const reminders = daysBeforeArray.map(days => {
-            const remindAt = new Date(dueDateObj);
-            remindAt.setDate(remindAt.getDate() - days);
+        let reminders = [];
+        const now = new Date();
+        
+        minutesOffsetArray.forEach(offsetMins => {
+            const remindAt = new Date(dueDateObj.getTime() + (offsetMins * 60000));
             
-            // If the reminder date is in the past, default to now + 5 mins
-            if (remindAt < new Date()) {
-                remindAt.setTime(new Date().getTime() + 5 * 60000);
-            }
+            // Only schedule if it's strictly in the future
+            if (remindAt >= now) {
+                let type = 'pre';
+                if (offsetMins === 0) type = 'exact';
+                if (offsetMins > 0) type = 'followup';
 
-            return {
-                task_id: taskId,
-                remind_at: remindAt.toISOString(),
-                type: 'pre',
-                status: 'pending'
-            };
+                reminders.push({
+                    task_id: taskId,
+                    remind_at: remindAt.toISOString(),
+                    type: type,
+                    status: 'pending'
+                });
+            }
         });
+
+        // Ensure at least the final exact deadline reminder exists!
+        if (reminders.length === 0 && dueDateObj >= new Date()) {
+            reminders.push({
+                task_id: taskId,
+                remind_at: dueDateObj.toISOString(),
+                type: 'exact',
+                status: 'pending'
+            });
+        } else if (reminders.length === 0) {
+            // Task is already past due when created (e.g. LLM parsed weirdly or user said "remind me yesterday")
+             reminders.push({
+                task_id: taskId,
+                remind_at: new Date(Date.now() + 60000).toISOString(), // bump to next minute
+                type: 'exact',
+                status: 'pending'
+            });
+        }
 
         await executeDbQuery(supabase.from('reminders').insert(reminders));
     }
@@ -145,6 +178,34 @@ class TaskService {
             console.log(`Marked ${overdue.length} tasks as missed.`);
             // In a full implementation, we log this to activity_log
         }
+    }
+
+    /**
+     * Mark a task as completed and cancel all pending reminders
+     */
+    async markTaskCompleted(taskId, userId) {
+        if (!supabase) return { success: false, message: 'DB not connected' };
+
+        // 1. Mark task as completed
+        const { error: taskError } = await supabase
+            .from('tasks')
+            .update({ status: 'completed' })
+            .eq('id', taskId)
+            .eq('user_id', userId);
+
+        if (taskError) {
+            console.error(`[TaskService] Failed to complete task ${taskId}:`, taskError);
+            return { success: false, message: 'Failed to complete task.' };
+        }
+
+        // 2. Kill pending reminders for this task
+        await supabase
+            .from('reminders')
+            .update({ status: 'cancelled' })
+            .eq('task_id', taskId)
+            .eq('status', 'pending');
+
+        return { success: true, message: '✅ Task completed and reminders cancelled.' };
     }
 
     _mockCreateTask(userId, taskData) {

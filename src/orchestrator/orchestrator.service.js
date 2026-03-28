@@ -87,6 +87,29 @@ class Orchestrator {
             } else {
                 msg = `Noted. Task "${taskData.title}" created.`;
             }
+        } else if (intentResult.intent === 'query_tasks') {
+            const taskQueryService = require('../tasks/task-query.service');
+            msg = await taskQueryService.queryPendingTasks(user);
+        } else if (intentResult.intent === 'approve_action') {
+            // "Mark task done" or "Done with XYZ"
+            // For now, if they just say "done", we might try to figure out which task
+            // V1 simplistic approach: If they say "done with rent", we need the ID. 
+            // The LLM extractor should probably fetch tasks too to link them, or we prompt for ID.
+            // If they replied to the list, they give a number. 
+            const completedTaskTitle = intentResult.entities.title;
+            if (completedTaskTitle && typeof completedTaskTitle === 'string') {
+                // Fuzzy match task by title
+                const pending = await taskService.getUserTasks(user.id);
+                const match = pending.find(t => t.title.toLowerCase().includes(completedTaskTitle.toLowerCase()) && t.status !== 'completed');
+                if (match) {
+                    await taskService.markTaskCompleted(match.id, user.id);
+                    msg = `✅ Marked "${match.title}" as completed. Good job!`;
+                } else {
+                    msg = `I couldn't find a pending task matching "${completedTaskTitle}". Reply "tasks" to see your list.`;
+                }
+            } else {
+                msg = "Please tell me which task you finished (e.g. 'Done with electricity bill').";
+            }
         } else if (intentResult.intent === 'conversational' || intentResult.intent === 'out_of_scope' || intentResult.intent === 'unknown') {
             console.log(`[Orchestrator] Engaging Generative Conversational Fallback...`);
             msg = await llm.generateConversationalResponse(inputEvent.raw_text, user);

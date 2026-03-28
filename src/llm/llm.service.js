@@ -75,11 +75,17 @@ class LLMService {
               ];
 
         for (const model of queue) {
+            const startTime = Date.now();
             try {
                 console.log(`[LLM Waterfall] Attempting ${model.id} (${model.name})...`);
-                if (model.type === 'claude') return await this._callClaude(prompt, model.name);
-                if (model.type === 'gemini') return await this._callGemini(prompt, model.name);
+                let result;
+                if (model.type === 'claude') result = await this._callClaude(prompt, model.name);
+                if (model.type === 'gemini') result = await this._callGemini(prompt, model.name);
+                
+                this._logTelemetry(model.id, model.name, Date.now() - startTime, true);
+                return result;
             } catch (e) {
+                this._logTelemetry(model.id, model.name, Date.now() - startTime, false, e.message);
                 console.warn(`[LLM Waterfall] ${model.id} Request Failed (${e.message}). Falling back...`);
             }
         }
@@ -98,6 +104,7 @@ class LLMService {
 
         const prompt = `SYSTEM: You are Ajrvis, a highly intelligent Chief of Staff AI managing an Indian household...
 CURRENT UTC TIME: ${new Date().toISOString()}
+USER TIMEZONE: ${userContext.settings?.timezone || 'Asia/Kolkata'}
 
 VALID INTENTS: create_task | create_event | add_provider | provider_exception | delegate_provider_task | school_event | complex_goal | query_tasks | query_providers | approve_action | reject_action | cancel_task | conversational | out_of_scope
 
@@ -112,12 +119,23 @@ DO NOT use markdown backticks in the final output. Pure raw JSON exclusively.
 USER MESSAGE: "${text}"
 
 EXPECTED FORMAT:
-{"intent": "...", "confidence": 0.0, "language": "...", "entities": {}}`;
+{
+  "intent": "...",
+  "confidence": 0.0,
+  "language": "...",
+  "entities": {
+    "title": "Clear actionable task title (e.g., 'Call Nitika')",
+    "due_date": "ISO8601 timestamp STRICTLY CALCULATED from 'CURRENT UTC TIME' if relative time given (e.g., 'in 2 minutes')",
+    "priority": "low|medium|high",
+    "provider_name": "...",
+    "amount": 0
+  }
+}
+CRITICAL INSTRUCTION: If user specifies relative time (e.g., "in 2 minutes", "tomorrow at 9 PM"), you MUST calculate the exact ISO8601 timestamp factoring in the USER TIMEZONE and the CURRENT UTC TIME. Do NOT output relative phrases. If no time/date is specified, leave due_date as null.`;
 
         try {
             const rawOutput = await this._waterfall(prompt);
-            const pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
-            return JSON.parse(pureJson);
+            return this._extractJson(rawOutput);
         } catch (e) {
             console.error("LLM Intent Classification Exception:", e);
             return { intent: 'unknown', confidence: 0, language: 'en', entities: {} };
@@ -138,8 +156,7 @@ GOAL: "${goalText}"`;
 
         try {
             const rawOutput = await this._waterfall(prompt);
-            const pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
-            return JSON.parse(pureJson);
+            return this._extractJson(rawOutput);
         } catch (e) {
             console.error("LLM Goal Breakdown Error:", e);
             return [];
@@ -163,8 +180,7 @@ GOAL: "${goalText}"`;
 
         try {
             const rawOutput = await this._waterfall(prompt);
-            const pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
-            return JSON.parse(pureJson);
+            return this._extractJson(rawOutput);
         } catch (e) {
             console.error(`LLM Entity Extraction Error (${type}):`, e);
             return type === 'name' ? { name: text } : [];
@@ -180,7 +196,7 @@ GOAL: "${goalText}"`;
 
         const prompt = `SYSTEM: You are Ajrvis, the elite AI Chief of Staff strictly managing an Indian household. 
 The user just sent a message that is conversational small-talk or a general question (not a specific operational task like delegating to a maid).
-Reply naturally, gracefully, and EXTREMELY CONCISELY (Maximum 20 words).
+Reply naturally, gracefully, and EXTREMELY CONCISELY (Strictly less than 15 words).
 
 USER CONTEXT:
 Name: ${userContext.name || 'Unknown'}
@@ -201,6 +217,30 @@ Reply directly to the user respectfully:`;
 
     _mockIntent(text) {
         return { intent: 'create_task', confidence: 0.9, language: 'en', entities: { title: "Mock task: " + text, due_date: null } };
+    }
+
+    /**
+     * Robustly extracts JSON from an LLM response even if it hallucinates markdown or text around it.
+     */
+    _extractJson(rawOutput) {
+        let pureJson = rawOutput;
+        const match = rawOutput.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (match) {
+            pureJson = match[0];
+        } else {
+            pureJson = rawOutput.replace(/```json\n?/gi, '').replace(/```\n?/gi, '').trim();
+        }
+        return JSON.parse(pureJson);
+    }
+
+    /**
+     * TELEMETRY ENGINE
+     * Low-impact logging for monitoring waterfall performance.
+     */
+    _logTelemetry(modelId, modelName, duration, success, error = null) {
+        if (!this.isDevMode && success) return; // Only log failures in Production; log everything in Dev
+        const status = success ? '✅ SUCCESS' : '❌ FAILED';
+        console.log(`[LLM Telemetry] ${status} | ${modelId} (${modelName}) | Latency: ${duration}ms${error ? ' | Error: ' + error : ''}`);
     }
 }
 
