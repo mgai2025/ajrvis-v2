@@ -2,7 +2,7 @@ const { executeDbQuery, supabase } = require('../shared/db');
 const CONSTANTS = require('../config/constants');
 
 class TaskService {
-    
+
     /**
      * Creates a new simple task
      * Applies Rule T-001 (default to 6pm or tomorrow 9am if no due date)
@@ -32,7 +32,7 @@ class TaskService {
         // Apply Generic Rule T-002: Check for duplicates within 24h
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
-        
+
         const duplicateCheck = await executeDbQuery(
             supabase.from('tasks')
                 .select('*')
@@ -85,7 +85,7 @@ class TaskService {
      */
     async generateReminders(taskId, dueDateObj, minutesOffsetArray) {
         if (!supabase) return;
-        
+
         // Safety fallback if the LLM returned a bad date string
         if (isNaN(dueDateObj.getTime())) {
             dueDateObj = new Date();
@@ -94,10 +94,10 @@ class TaskService {
 
         let reminders = [];
         const now = new Date();
-        
+
         minutesOffsetArray.forEach(offsetMins => {
             const remindAt = new Date(dueDateObj.getTime() + (offsetMins * 60000));
-            
+
             // Only schedule if it's strictly in the future
             if (remindAt >= now) {
                 let type = 'pre';
@@ -123,7 +123,7 @@ class TaskService {
             });
         } else if (reminders.length === 0) {
             // Task is already past due when created (e.g. LLM parsed weirdly or user said "remind me yesterday")
-             reminders.push({
+            reminders.push({
                 task_id: taskId,
                 remind_at: new Date(Date.now() + 60000).toISOString(), // bump to next minute
                 type: 'exact',
@@ -140,15 +140,19 @@ class TaskService {
     async getUserTasks(userId, dateFilter = null) {
         if (!supabase) return [];
 
-        let query = supabase.from('tasks').select('*').eq('user_id', userId).order('due_date', { ascending: true });
-        
+        // Fetch where the user is EITHER the creator OR the assignee
+        // Also fetch the names of both users for display purposes
+        let query = supabase.from('tasks')
+            .select('*, owner:users!user_id(name), assignee:users!assigned_to(name)')
+            .or(`user_id.eq.${userId},assigned_to.eq.${userId}`)
+            .order('due_date', { ascending: true });
         if (dateFilter) {
             // E.g., filter for 'today'
             const startOfDay = new Date(dateFilter);
-            startOfDay.setHours(0,0,0,0);
+            startOfDay.setHours(0, 0, 0, 0);
             const endOfDay = new Date(dateFilter);
-            endOfDay.setHours(23,59,59,999);
-            
+            endOfDay.setHours(23, 59, 59, 999);
+
             query = query.gte('due_date', startOfDay.toISOString()).lte('due_date', endOfDay.toISOString());
         }
 
@@ -186,12 +190,12 @@ class TaskService {
     async markTaskCompleted(taskId, userId) {
         if (!supabase) return { success: false, message: 'DB not connected' };
 
-        // 1. Mark task as completed
+        // 1. Mark task as completed (only owner or assignee can complete)
         const { error: taskError } = await supabase
             .from('tasks')
             .update({ status: 'completed' })
             .eq('id', taskId)
-            .eq('user_id', userId);
+            .or(`user_id.eq.${userId},assigned_to.eq.${userId}`);
 
         if (taskError) {
             console.error(`[TaskService] Failed to complete task ${taskId}:`, taskError);
@@ -205,7 +209,68 @@ class TaskService {
             .eq('task_id', taskId)
             .eq('status', 'pending');
 
+        // 3. Spawn recurrence if applicable (Rule T-004)
+        const task = await executeDbQuery(supabase.from('tasks').select('*').eq('id', taskId).single());
+        if (task && task.recurrence_rule) {
+            await this.spawnNextRecurrence(task.id);
+        }
+
         return { success: true, message: '✅ Task completed and reminders cancelled.' };
+    }
+
+    /**
+     * Spawns the next instance of a recurring task
+     * Idempotent logic prevents duplicates on the same future date.
+     */
+    async spawnNextRecurrence(taskId) {
+        if (!supabase) return;
+
+        const task = await executeDbQuery(supabase.from('tasks').select('*').eq('id', taskId).single());
+        if (!task || !task.recurrence_rule) return;
+
+        const currentDueDate = new Date(task.due_date);
+        let nextDueDate = new Date(currentDueDate);
+
+        const rule = task.recurrence_rule.toLowerCase();
+        if (rule === 'daily') nextDueDate.setDate(nextDueDate.getDate() + 1);
+        else if (rule === 'weekly') nextDueDate.setDate(nextDueDate.getDate() + 7);
+        else if (rule === 'monthly') nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+        else return;
+
+        const duplicateCheck = await executeDbQuery(
+            supabase.from('tasks')
+                .select('id')
+                .eq('user_id', task.user_id)
+                .eq('title', task.title)
+                .eq('due_date', nextDueDate.toISOString())
+                .limit(1)
+        );
+
+        if (duplicateCheck && duplicateCheck.length > 0) return;
+
+        const newTask = await executeDbQuery(
+            supabase.from('tasks').insert([{
+                user_id: task.user_id,
+                title: task.title,
+                priority: task.priority,
+                due_date: nextDueDate.toISOString(),
+                type: task.type,
+                recurrence_rule: task.recurrence_rule,
+                status: 'scheduled',
+                goal_id: task.goal_id,
+                assigned_to: task.assigned_to,
+                parent_task_id: task.parent_task_id
+            }]).select().single()
+        );
+
+        const diffHours = (nextDueDate.getTime() - Date.now()) / (1000 * 60 * 60);
+        let schedule = CONSTANTS.REMINDER_SCHEDULES.LONG_TERM;
+        if (diffHours < 2) schedule = CONSTANTS.REMINDER_SCHEDULES.SHORT_TERM;
+        else if (diffHours <= 24) schedule = CONSTANTS.REMINDER_SCHEDULES.DAILY;
+        else if (diffHours <= 168) schedule = CONSTANTS.REMINDER_SCHEDULES.MULTI_DAY;
+
+        await this.generateReminders(newTask.id, nextDueDate, schedule);
+        return newTask;
     }
 
     _mockCreateTask(userId, taskData) {

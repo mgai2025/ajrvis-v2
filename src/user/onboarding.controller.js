@@ -45,10 +45,19 @@ class OnboardingController {
         const nameData = await llmService.extractEntities(text, 'name');
         const cleanName = nameData.name || text;
         
+        let nextState = 'family_setup';
+        if (user.role === 'secondary') {
+            nextState = 'complete'; // Spouse Shortcut S-011
+        }
+
         await userService.updateUser(user.id, { 
             name: cleanName,
-            onboarding_state: 'family_setup'
+            onboarding_state: nextState
         });
+
+        if (nextState === 'complete') {
+            return `Hi ${cleanName}! I have already set up the household rules based on the primary account. You can just tell me what to do!`;
+        }
 
         return `Hi ${cleanName}! Who else is in your family?\n(e.g. "husband Rahul, son Aryan age 8")`;
     }

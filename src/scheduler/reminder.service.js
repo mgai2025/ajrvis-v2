@@ -2,6 +2,7 @@ const { executeDbQuery, supabase } = require('../shared/db');
 const outboundAdapter = require('../gateway/outbound.service');
 const CONSTANTS = require('../config/constants');
 const userService = require('../user/user.service');
+const taskService = require('../tasks/task.service');
 
 class ReminderService {
     /**
@@ -25,13 +26,13 @@ class ReminderService {
             if (!pendingReminders || pendingReminders.length === 0) return;
 
             for (const reminder of pendingReminders) {
-                 // Double check if task is already completed (in case reminders didn't cancel cleanly)
-                 if (!reminder.tasks || reminder.tasks.status === 'completed') {
-                     await this.markReminderStatus(reminder.id, 'cancelled');
-                     continue;
-                 }
+                // Double check if task is already completed (in case reminders didn't cancel cleanly)
+                if (!reminder.tasks || reminder.tasks.status === 'completed') {
+                    await this.markReminderStatus(reminder.id, 'cancelled');
+                    continue;
+                }
 
-                 await this._sendReminderMessage(reminder);
+                await this._sendReminderMessage(reminder);
             }
         } catch (error) {
             console.error('[Scheduler] Error processing reminders:', error);
@@ -60,19 +61,24 @@ class ReminderService {
             // Send via Output Abstraction
             await outboundAdapter.sendMessage(user.phone, messageText);
 
+            // Trigger Recurrence Rules
+            if (reminder.type === 'exact') {
+                await taskService.spawnNextRecurrence(reminder.task_id);
+            }
+
             // Update Reminder Attempt Counts
             const newAttemptCount = (reminder.attempt_count || 0) + 1;
-            
+
             if (newAttemptCount >= CONSTANTS.SCHEDULER.MAX_FOLLOWUPS && reminder.type !== 'escalation') {
-                 // S-007 / T-006 ESCALATE
-                 console.log(`[Scheduler] Reminder ${reminder.id} hit max followups. Escalating...`); // We will add escalation logic later
-                 await supabase.from('tasks').update({ status: 'escalated' }).eq('id', reminder.task_id);
-                 await this.markReminderStatus(reminder.id, 'cancelled'); // Kill this loop since task is escalated
+                // S-007 / T-006 ESCALATE
+                console.log(`[Scheduler] Reminder ${reminder.id} hit max followups. Escalating...`); // We will add escalation logic later
+                await supabase.from('tasks').update({ status: 'escalated' }).eq('id', reminder.task_id);
+                await this.markReminderStatus(reminder.id, 'cancelled'); // Kill this loop since task is escalated
             } else {
-                 await supabase.from('reminders').update({ 
-                     status: 'sent', 
-                     attempt_count: newAttemptCount 
-                 }).eq('id', reminder.id);
+                await supabase.from('reminders').update({
+                    status: 'sent',
+                    attempt_count: newAttemptCount
+                }).eq('id', reminder.id);
             }
 
         } catch (error) {

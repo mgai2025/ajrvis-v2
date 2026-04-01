@@ -36,7 +36,8 @@ class ProviderService {
 
         return { 
             success: true, 
-            message: `Noted. I've officially marked ${provider.name} as ${status} for ${dateStr}.` 
+            message: `Noted. I've officially marked ${provider.name} as ${status} for ${dateStr || new Date().toISOString().split('T')[0]}.`,
+            providerRole: provider.role
         };
     }
 

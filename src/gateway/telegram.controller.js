@@ -9,23 +9,9 @@ const token = process.env.TELEGRAM_BOT_Token;
 
 let bot = null;
 if (token) {
-    // Disable polling aggressively on Vercel to prevent infinite socket hanging
-    const isVercel = !!process.env.VERCEL;
-    bot = new TelegramBot(token, { polling: !isVercel }); 
-    
-    // Listen for messages if we are polling locally
-    bot.on('message', async (msg) => {
-        console.log('Received Telegram message:', msg.text);
-        try {
-            const inputEvent = normalizer.fromTelegram(msg);
-            const responseText = await orchestrator.routeMessage(inputEvent);
-            if (responseText) {
-                await bot.sendMessage(msg.chat.id, responseText);
-            }
-        } catch (error) {
-            console.error('Error processing Telegram message:', error);
-        }
-    });
+    // Polling is completely DISABLED permanently. 
+    // This bot relies 100% on the Webhook route hosted on Vercel.
+    bot = new TelegramBot(token, { polling: false }); 
 
 } else {
     console.warn('TELEGRAM_BOT_Token is not set in .env. Telegram integration disabled.');
@@ -50,8 +36,46 @@ const receiveMessage = async (req, res) => {
             // Normalize input
             const inputEvent = normalizer.fromTelegram(message);
 
-            // MUST await this entirely BEFORE sending the 200 OK, otherwise Vercel freezes the function!
-            responseText = await orchestrator.routeMessage(inputEvent);
+            // SPRINT 2: Intercept Deep Link Delegation
+            if (message.text && message.text.startsWith('/start delegate_')) {
+                const taskId = message.text.split('delegate_')[1];
+                console.log('[Telegram Controller] Intercepted Delegation Approval for Task:', taskId);
+                
+                const userService = require('../user/user.service');
+                const delegationService = require('../tasks/delegation.service');
+                
+                // Fetch user directly to ensure we have the DB object
+                let userObj = await userService.getUserByPhone(inputEvent.user_phone);
+                
+                if (!userObj) {
+                    // Open-Loop Self Registration: Claim the task by implicitly creating the user
+                    const givenName = inputEvent.metadata.username || 'Friend';
+                    const { executeDbQuery, supabase } = require('../shared/db');
+                    if (supabase) {
+                        userObj = await executeDbQuery(
+                            supabase.from('users').insert({ 
+                                phone: inputEvent.user_phone, 
+                                name: givenName,
+                                role: 'secondary',
+                                channel: 'telegram',
+                                onboarding_state: 'completed',
+                                settings: {}
+                            }).select().single()
+                        );
+                    }
+                }
+                
+                if (userObj) {
+                    responseText = await delegationService.acceptDelegation(userObj, taskId);
+                } else {
+                    responseText = "System Error: Could not auto-register your profile.";
+                }
+            } else {
+                // Normal Conversational Flow
+                // MUST await this entirely BEFORE sending the 200 OK, otherwise Vercel freezes the function!
+                responseText = await orchestrator.routeMessage(inputEvent);
+            }
+
 
             // Send response back via Telegram
             if (responseText) {
@@ -62,6 +86,13 @@ const receiveMessage = async (req, res) => {
         return res.status(200).json({ status: 'SUCCESS', message: responseText });
     } catch (error) {
         console.error('Error processing Telegram webhook payload:', error);
+        if (bot && req.body && req.body.message && req.body.message.chat) {
+            try {
+                await bot.sendMessage(req.body.message.chat.id, "⚠️ Something went wrong on my end. Please try again.");
+            } catch (e) {
+                console.error('Failed to send fallback error message via webhook catch:', e);
+            }
+        }
         return res.status(500).json({ status: 'ERROR', error: error.message, stack: error.stack });
     }
 };

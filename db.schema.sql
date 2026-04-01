@@ -12,6 +12,16 @@ CREATE TABLE users (
     role VARCHAR CHECK (role IN ('primary', 'secondary')) DEFAULT 'primary',
     onboarding_state VARCHAR CHECK (onboarding_state IN ('new', 'name_collected', 'family_setup', 'providers_setup', 'complete')) DEFAULT 'new',
     settings JSONB DEFAULT '{}',
+    conversation_state JSONB DEFAULT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE family_relationships (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    primary_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    secondary_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    relationship_type VARCHAR CHECK (relationship_type IN ('spouse', 'parent', 'other')) DEFAULT 'spouse',
+    status VARCHAR CHECK (status IN ('pending', 'active', 'revoked')) DEFAULT 'pending',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -30,7 +40,7 @@ CREATE TABLE tasks (
     title VARCHAR NOT NULL,
     description TEXT,
     type VARCHAR CHECK (type IN ('simple', 'scheduled', 'recurring', 'delegated', 'approval_pending')) DEFAULT 'simple',
-    status VARCHAR CHECK (status IN ('created', 'scheduled', 'in_progress', 'pending_approval', 'completed', 'missed', 'escalated')) DEFAULT 'created',
+    status VARCHAR CHECK (status IN ('created', 'scheduled', 'in_progress', 'pending_approval', 'pending_acceptance', 'completed', 'missed', 'escalated')) DEFAULT 'created',
     priority VARCHAR CHECK (priority IN ('low', 'medium', 'high')) DEFAULT 'medium',
     due_date TIMESTAMP WITH TIME ZONE,
     recurrence_rule VARCHAR,
@@ -70,7 +80,7 @@ CREATE TABLE reminders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
     remind_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    type VARCHAR CHECK (type IN ('pre', 'followup', 'escalation')) DEFAULT 'pre',
+    type VARCHAR CHECK (type IN ('pre', 'exact', 'followup', 'escalation')) DEFAULT 'pre',
     status VARCHAR CHECK (status IN ('pending', 'sent', 'cancelled')) DEFAULT 'pending',
     attempt_count INT DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

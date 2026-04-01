@@ -16,8 +16,8 @@ class LLMService {
         // Initialize Gemini
         if (geminiApiKey) {
             this.genAI = new GoogleGenerativeAI(geminiApiKey);
-            this.geminiPro = this.genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
-            this.geminiFlash = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+            this.geminiPro = this.genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+            this.geminiFlash = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
         } else {
             console.warn('GEMINI_API_KEY is not set in .env. Gemini Fallbacks disabled.');
         }
@@ -25,7 +25,7 @@ class LLMService {
         // Initialize Claude
         if (anthropicApiKey && anthropicApiKey !== 'your_anthropic_key') {
             this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
-            this.claudeSonnet = "claude-sonnet-4-6";
+            this.claudeSonnet = "claude-3-5-sonnet-20241022";
             this.claudeHaiku = process.env.CLAUDE_HAIKU_ID || "claude-3-haiku-20240307";
         } else {
             console.warn('ANTHROPIC_API_KEY is not set. Claude Engine disabled.');
@@ -64,14 +64,14 @@ class LLMService {
         const queue = this.isDevMode 
             ? [
                 { id: 'haiku', type: 'claude', name: this.claudeHaiku },
-                { id: 'flash', type: 'gemini', name: 'gemini-2.5-flash' },
-                { id: 'pro', type: 'gemini', name: 'gemini-2.5-pro' },
+                { id: 'flash', type: 'gemini', name: 'gemini-1.5-flash' },
+                { id: 'pro', type: 'gemini', name: 'gemini-1.5-pro' },
                 { id: 'sonnet', type: 'claude', name: this.claudeSonnet }
               ]
             : [
                 { id: 'sonnet', type: 'claude', name: this.claudeSonnet },
-                { id: 'pro', type: 'gemini', name: 'gemini-2.5-pro' },
-                { id: 'flash', type: 'gemini', name: 'gemini-2.5-flash' }
+                { id: 'pro', type: 'gemini', name: 'gemini-1.5-pro' },
+                { id: 'flash', type: 'gemini', name: 'gemini-1.5-flash' }
               ];
 
         for (const model of queue) {
@@ -97,39 +97,61 @@ class LLMService {
     /**
      * The unified intent classification model
      */
-    async classifyIntent(text, userContext = {}) {
+    async classifyIntent(text, userContext = {}, historyContext = null) {
         if (!this.genAI && !this.anthropic) {
             return this._mockIntent(text);
         }
 
+        const historyBlock = historyContext ? `\nCONVERSATIONAL HISTORY:\n${historyContext}\nCRITICAL: Use the history above to resolve ambiguous pronouns ('it', 'that') in the User Message.` : '';
+
         const prompt = `SYSTEM: You are Ajrvis, a highly intelligent Chief of Staff AI managing an Indian household...
 CURRENT UTC TIME: ${new Date().toISOString()}
 USER TIMEZONE: ${userContext.settings?.timezone || 'Asia/Kolkata'}
+${historyBlock}
 
-VALID INTENTS: create_task | create_event | add_provider | provider_exception | delegate_provider_task | school_event | complex_goal | query_tasks | query_providers | approve_action | reject_action | cancel_task | conversational | out_of_scope
+VALID INTENTS: create_task | create_event | add_provider | provider_exception | delegate_provider_task | delegate_task | provider_advance | calculate_salary | school_event | complex_goal | query_tasks | query_providers | approve_action | reject_action | cancel_task | update_settings | conversational | out_of_scope
+
+INTENT MAPPING RULES:
+- 'delegate_provider_task': Use when telling a domestic worker to do something (e.g. "Tell cook to make pasta").
+- 'delegate_task': Use strictly when assigning a personal task to a family member or spouse (e.g. "Ask Mohit to pick up Kynaa", "Tell Rahul to pay rent").
+- 'school_event': Strictly for administrative school tracking (e.g. exams, parent-teacher meetings, school fees). DO NOT use for birthdays or parties.
+- 'complex_goal': For broad, multi-step ambiguous projects (e.g. "Plan a birthday party", "Organize a trip"). These require breaking down into actionable tasks.
+- 'approve_action': Strictly use this when the user says they have COMPLETED a task, e.g., "done with 1", "marked X complete", "finished the rent". Do NOT use cancel_task for completed tasks.
+- 'update_settings': Use when the user explicitly wants to change a preference, like "Change my morning brief to 8 AM" or "Switch my language to English".
+- MULTI-TASKING: Users often send multiple tasks in a single message (e.g. "Remind me to call mom, and also tell the cook to make dal"). Output ALL detected intents as an array.
+- CONFIDENCE PENALTY: If the user uses an ambiguous contextual pronoun ("make that 5pm", "call him") and you CANNOT resolve the noun naturally, you MUST purposefully downgrade your 'confidence' score below 0.60.
 
 INJECTED CONTEXT: 
 User Name: ${userContext.name || 'Unknown'}
 Children: ${JSON.stringify(userContext.children || [])}
 Domestic Providers: ${JSON.stringify(userContext.providers || [])}
 
-Given the following message from the user, output exactly a JSON object defining the intent, confidence (0.0 - 1.0), detected language (e.g. 'en', 'hi'), and extracted entities natively.
+Given the following message from the user, output exactly a JSON object defining an array of intents.
 DO NOT use markdown backticks in the final output. Pure raw JSON exclusively.
 
 USER MESSAGE: "${text}"
 
 EXPECTED FORMAT:
 {
-  "intent": "...",
-  "confidence": 0.0,
-  "language": "...",
-  "entities": {
-    "title": "Clear actionable task title (e.g., 'Call Nitika')",
-    "due_date": "ISO8601 timestamp STRICTLY CALCULATED from 'CURRENT UTC TIME' if relative time given (e.g., 'in 2 minutes')",
-    "priority": "low|medium|high",
-    "provider_name": "...",
-    "amount": 0
-  }
+  "intents": [
+    {
+      "intent": "...",
+      "confidence": 0.0,
+      "language": "...",
+      "entities": {
+        "title": "Clear actionable task title (e.g., 'Call Nitika')",
+        "due_date": "ISO8601 timestamp STRICTLY CALCULATED from 'CURRENT UTC TIME' if relative time given (e.g., 'in 2 minutes')",
+        "priority": "low|medium|high",
+        "provider_name": "...",
+        "assignee_name": "Name of the family member to assign task to (e.g., 'Mohit')",
+        "amount": 0,
+        "child_name": "...",
+        "event_type": "ptm|exam|fee|holiday|activity|other",
+        "setting_name": "morning_brief_time|language|timezone",
+        "setting_value": "..."
+      }
+    }
+  ]
 }
 CRITICAL INSTRUCTION: If user specifies relative time (e.g., "in 2 minutes", "tomorrow at 9 PM"), you MUST calculate the exact ISO8601 timestamp factoring in the USER TIMEZONE and the CURRENT UTC TIME. Do NOT output relative phrases. If no time/date is specified, leave due_date as null.`;
 
@@ -138,7 +160,7 @@ CRITICAL INSTRUCTION: If user specifies relative time (e.g., "in 2 minutes", "to
             return this._extractJson(rawOutput);
         } catch (e) {
             console.error("LLM Intent Classification Exception:", e);
-            return { intent: 'unknown', confidence: 0, language: 'en', entities: {} };
+            return { intents: [{ intent: 'unknown', confidence: 0, language: 'en', entities: {} }] };
         }
     }
 
@@ -188,10 +210,48 @@ GOAL: "${goalText}"`;
     }
 
     /**
+     * Sprint F (Phase 2): Knowledge Graph Nightly Distillation
+     * Evaluates a batch of fuzzy low-confidence regex extractions.
+     * Returns a JSON array of validated facts with their corrected confidence.
+     */
+    async evaluateKnowledgeBatch(factBatch) {
+        if (!this.genAI && !this.anthropic) return [];
+        if (!factBatch || factBatch.length === 0) return [];
+
+        // Compile batch string for prompt
+        const batchString = factBatch.map(f => 
+            `[ID: ${f.id}] text: "${f.raw_snippet}", subject: "${f.subject_extracted}", detail: "${f.detail_extracted}", candidate_table: ${f.candidate_table}`
+        ).join('\n');
+
+        const prompt = `SYSTEM: You are an analytical engine for a Knowledge Graph.
+I am passing you a batch of raw sentences flagged by basic heuristics. Your job is to read the sentence, evaluate the semantic truth, and assign a firm confidence score (0.0 to 1.0).
+
+RULES:
+1. If the user states a fact definitively (e.g. "Kynaa hates broccoli"), confidence > 0.90.
+2. If the user states a temporal/situational observation (e.g. "Kynaa didn't eat broccoli today"), confidence < 0.60.
+3. You may re-write the "detail" to be cleaner and more standardized.
+4. Output EXACTLY a RAW JSON array of objects. No markdown ticks \`\`\`.
+
+FORMAT OUTPUT:
+[{"id": "the-uuid", "confidence": 0.95, "cleaned_detail": "standardized detail text", "is_valid": true}]
+
+BATCH TO EVALUATE:
+${batchString}`;
+
+        try {
+            const rawOutput = await this._waterfall(prompt);
+            return this._extractJson(rawOutput);
+        } catch (e) {
+            console.error("LLM Knowledge Distillation Error:", e);
+            return []; // Fail closed mathematically
+        }
+    }
+
+    /**
      * Generates a conversational, empathetic response gracefully.
      * Prevents the structural LLM from throwing "Out of Scope" on small talk.
      */
-    async generateConversationalResponse(text, userContext = {}) {
+    async generateConversationalResponse(text, userContext = {}, injectedContext = '') {
         if (!this.genAI && !this.anthropic) return "I am currently offline, but how can I help you today?";
 
         const prompt = `SYSTEM: You are Ajrvis, the elite AI Chief of Staff strictly managing an Indian household. 
@@ -202,6 +262,7 @@ USER CONTEXT:
 Name: ${userContext.name || 'Unknown'}
 Children: ${JSON.stringify(userContext.children || [])}
 Domestic Staff: ${JSON.stringify(userContext.providers || [])}
+${injectedContext}
 
 USER MESSAGE: "${text}"
 
@@ -216,7 +277,11 @@ Reply directly to the user respectfully:`;
     }
 
     _mockIntent(text) {
-        return { intent: 'create_task', confidence: 0.9, language: 'en', entities: { title: "Mock task: " + text, due_date: null } };
+        return { 
+            intents: [
+                { intent: 'create_task', confidence: 0.9, language: 'en', entities: { title: "Mock task: " + text, due_date: null } }
+            ]
+        };
     }
 
     /**
@@ -241,6 +306,17 @@ Reply directly to the user respectfully:`;
         if (!this.isDevMode && success) return; // Only log failures in Production; log everything in Dev
         const status = success ? '✅ SUCCESS' : '❌ FAILED';
         console.log(`[LLM Telemetry] ${status} | ${modelId} (${modelName}) | Latency: ${duration}ms${error ? ' | Error: ' + error : ''}`);
+    }
+
+    /**
+     * V1 Confidence Evaluator: Triggers Secondary History Hop if the LLM struggled.
+     * Moved to distinct function to allow complex Advanced Regex heuristics in V2 Backlog.
+     */
+    evaluateConfidence(intentResult) {
+        if (!intentResult) return true; // Force lookup if parsing crashed
+        if (intentResult.intent === 'conversational') return true; // Casual chit-chat implies high continuity
+        if (intentResult.confidence < 0.60) return true; // AI mathematically panicked
+        return false;
     }
 }
 

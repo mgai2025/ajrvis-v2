@@ -34,6 +34,18 @@ const CONFIG = {
         DAILY: [-60, 0, 60, 1440], // 2-24 hrs
         MULTI_DAY: [-1440, -120, 0, 60, 1440], // 1-7 days
         LONG_TERM: [-4320, -1440, 0, 60, 1440] // > 7 days
+    },
+
+    DELEGATION_REMINDER_SCHEDULES: {
+        // Dynamic schedules specifically for peer-to-peer delegation
+        // If deadline < 24h: aggressive follow-up
+        URGENT_24H: [-90, -60, -30], 
+        // If > 24h: normal follow-up
+        STANDARD: [-1440, -120, -60]
+    },
+
+    BOT_LINKS: {
+        TELEGRAM_BASE: 'https://t.me/AjrvisBot?start='
     }
 };
 

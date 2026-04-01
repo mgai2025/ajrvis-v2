@@ -21,8 +21,9 @@ describe('LLM Service - JSON Extraction & Intent Parsing', () => {
 
     test('_mockIntent returns valid fallback schema', () => {
         const result = llmService._mockIntent("Remind me tomorrow");
-        expect(result.intent).toBe('create_task');
-        expect(result.language).toBe('en');
-        expect(result.entities.title).toContain("Remind me");
+        expect(result.intents).toBeDefined();
+        expect(result.intents[0].intent).toBe('create_task');
+        expect(result.intents[0].language).toBe('en');
+        expect(result.intents[0].entities.title).toContain("Remind me");
     });
 });
