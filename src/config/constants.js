@@ -45,7 +45,9 @@ const CONFIG = {
     },
 
     BOT_LINKS: {
-        TELEGRAM_BASE: 'https://t.me/AjrvisBot?start='
+        TELEGRAM_BASE: process.env.TELEGRAM_BOT_USERNAME 
+            ? `https://t.me/${process.env.TELEGRAM_BOT_USERNAME}?start=`
+            : 'https://t.me/PROVIDE_BOT_USERNAME_IN_ENV?start='
     }
 };
 
