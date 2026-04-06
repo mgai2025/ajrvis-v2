@@ -25,6 +25,10 @@ class ReminderService {
             if (error) throw error;
             if (!pendingReminders || pendingReminders.length === 0) return;
 
+            // BUG-013 FIX: Lock-Then-Send to prevent race condition storms
+            const reminderIds = pendingReminders.map(r => r.id);
+            await supabase.from('reminders').update({ status: 'processing' }).in('id', reminderIds);
+
             for (const reminder of pendingReminders) {
                 // Double check if task is already completed (in case reminders didn't cancel cleanly)
                 if (!reminder.tasks || reminder.tasks.status === 'completed') {
@@ -83,6 +87,8 @@ class ReminderService {
 
         } catch (error) {
             console.error(`[Scheduler] Error sending reminder ${reminder.id}:`, error);
+            // Revert the lock so the next heartbeat can try again
+            await this.markReminderStatus(reminder.id, 'pending');
         }
     }
 
