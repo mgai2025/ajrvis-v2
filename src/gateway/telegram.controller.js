@@ -93,7 +93,8 @@ const receiveMessage = async (req, res) => {
                 console.error('Failed to send fallback error message via webhook catch:', e);
             }
         }
-        return res.status(500).json({ status: 'ERROR', error: error.message, stack: error.stack });
+        // BUG-015: Return 200 OK so Telegram stops retrying and sending 8x messages
+        return res.status(200).json({ status: 'ACKNOWLEDGED_ERROR', error: error.message, stack: error.stack });
     }
 };
 
