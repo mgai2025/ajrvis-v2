@@ -11,5 +11,15 @@
       "src": "/(.*)",
       "dest": "api/index.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/webhook/cron/heartbeat",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/webhook/cron/morning-brief",
+      "schedule": "0 2 * * *"
+    }
   ]
 }
