@@ -57,7 +57,8 @@ class TaskService {
                 priority: taskData.priority || 'medium',
                 due_date: dueDate,
                 type: 'simple',
-                status: 'scheduled'
+                status: 'scheduled',
+                source_channel: taskData.channel || 'whatsapp'
             }]).select().single()
         );
 

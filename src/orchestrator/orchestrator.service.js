@@ -243,7 +243,8 @@ class Orchestrator {
                     title: taskTitle,
                     due_date: intentResult.entities.due_date, // handled by TaskService if missing
                     priority: intentResult.entities.priority,
-                    force_create: intentResult.entities.force_create // from the reconstructed intent
+                    force_create: intentResult.entities.force_create, // from the reconstructed intent
+                    channel: inputEvent.channel
                 };
                 const result = await taskService.createTask(user.id, taskData);
 
