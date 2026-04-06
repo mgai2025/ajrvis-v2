@@ -25,11 +25,49 @@ class ReminderService {
             if (error) throw error;
             if (!pendingReminders || pendingReminders.length === 0) return;
 
-            // BUG-013 FIX: Lock-Then-Send to prevent race condition storms
-            const reminderIds = pendingReminders.map(r => r.id);
-            await supabase.from('reminders').update({ status: 'processing' }).in('id', reminderIds);
+            // BUG-014 FIX: Deduplicate redundant backlog reminders
+            const latestRemindersMap = new Map();
+            const redundantReminderIds = [];
 
             for (const reminder of pendingReminders) {
+                const existing = latestRemindersMap.get(reminder.task_id);
+                if (!existing) {
+                    latestRemindersMap.set(reminder.task_id, reminder);
+                } else {
+                    const existingTime = new Date(existing.remind_at).getTime();
+                    const currentTime = new Date(reminder.remind_at).getTime();
+
+                    if (currentTime > existingTime) {
+                        redundantReminderIds.push(existing.id);
+                        latestRemindersMap.set(reminder.task_id, reminder);
+                    } else {
+                        redundantReminderIds.push(reminder.id);
+                    }
+                }
+            }
+
+            const activeReminders = Array.from(latestRemindersMap.values());
+
+            // Auto-Cancel Redundant Reminders & Log Analytics
+            if (redundantReminderIds.length > 0) {
+                await supabase.from('reminders').update({ status: 'cancelled' }).in('id', redundantReminderIds);
+                const logEntries = redundantReminderIds.map(id => ({
+                    entity_type: 'reminder',
+                    entity_id: id,
+                    action: 'superseded_by_backlog',
+                    actor: 'system',
+                    metadata: { reason: "superseded due to redundancy which happened due to reminders not sent earlier and pending many tasks together" }
+                }));
+                await supabase.from('activity_log').insert(logEntries);
+            }
+
+            if (activeReminders.length === 0) return;
+
+            // BUG-013 FIX: Lock-Then-Send on only the active ones
+            const reminderIds = activeReminders.map(r => r.id);
+            await supabase.from('reminders').update({ status: 'processing' }).in('id', reminderIds);
+
+            for (const reminder of activeReminders) {
                 // Double check if task is already completed (in case reminders didn't cancel cleanly)
                 if (!reminder.tasks || reminder.tasks.status === 'completed') {
                     await this.markReminderStatus(reminder.id, 'cancelled');
