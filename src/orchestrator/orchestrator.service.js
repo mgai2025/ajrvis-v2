@@ -12,7 +12,7 @@ class Orchestrator {
     async routeMessage(inputEvent) {
         return Promise.race([
             this._routeMessageInternal(inputEvent),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Orchestrator Timeout: Engine took longer than 15s')), 15000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Orchestrator Timeout: Engine took longer than 50s')), 50000))
         ]);
     }
 

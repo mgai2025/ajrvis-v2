@@ -6,30 +6,48 @@ class MorningBriefService {
     /**
      * Executes the daily morning brief sequence
      */
-    async executeDailyBrief() {
-        if (!supabase) {
-            console.warn('[Scheduler] Skipping Morning Brief. DB Not Connected.');
-            return;
-        }
+    async processGlobalMorningBriefs() {
+        if (!supabase) return;
 
-        console.log('[Scheduler] Executing Daily Morning Brief for all users...');
         try {
-            // In a fully scaled V1, we would query `users` table where `settings.morning_brief_enabled = true`
-            // and maybe filter by `settings.morning_brief_time` matching the current hour
             const { data: users, error } = await supabase.from('users').select('*');
-
             if (error) throw error;
             if (!users || users.length === 0) return;
 
-            for (const user of users) {
-                // If it's a secondary user without tracking enabled, skip.
-                if (user.role === 'secondary') continue;
+            const now = new Date();
 
-                const briefMsg = await taskQueryService.buildMorningBrief(user);
-                await outboundAdapter.sendMessage(user.phone, briefMsg);
+            for (const user of users) {
+                if (user.role === 'secondary') continue; // Secondary users don't get the brief
+
+                const settings = user.settings || {};
+                const timeZone = settings.timezone || 'Asia/Kolkata';
+                const briefHour = parseInt(settings.morning_brief_time || '7', 10);
+
+                // Safely extract the user's localized date and hour
+                const formatter = new Intl.DateTimeFormat('en-US', { timeZone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' });
+                const parts = formatter.formatToParts(now);
+                const p = {};
+                parts.forEach(part => p[part.type] = part.value);
+                
+                const localDateStr = `${p.year}-${p.month}-${p.day}`; // "YYYY-MM-DD"
+                const userLocalHour = parseInt(p.hour, 10);
+
+                if (userLocalHour >= briefHour) {
+                    if (settings.last_morning_brief_date !== localDateStr) {
+                        console.log(`[MorningBrief] Sending brief to user ${user.id} in timezone ${timeZone} for ${localDateStr}`);
+
+                        const briefMsg = await taskQueryService.buildMorningBrief(user);
+                        if (briefMsg) {
+                            await outboundAdapter.sendMessage(user.phone, briefMsg);
+                        }
+
+                        settings.last_morning_brief_date = localDateStr;
+                        await supabase.from('users').update({ settings }).eq('id', user.id);
+                    }
+                }
             }
         } catch (error) {
-            console.error('[Scheduler] Error executing Daily Brief:', error);
+            console.error('[Scheduler] Error processing global briefs:', error);
         }
     }
 }

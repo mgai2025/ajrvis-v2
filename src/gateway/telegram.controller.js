@@ -88,7 +88,7 @@ const receiveMessage = async (req, res) => {
         console.error('Error processing Telegram webhook payload:', error);
         if (bot && req.body && req.body.message && req.body.message.chat) {
             try {
-                await bot.sendMessage(req.body.message.chat.id, "⚠️ Something went wrong on my end. Please try again.");
+                await bot.sendMessage(req.body.message.chat.id, `⚠️ System Error: ${error.message}`);
             } catch (e) {
                 console.error('Failed to send fallback error message via webhook catch:', e);
             }

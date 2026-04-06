@@ -78,9 +78,16 @@ class LLMService {
             const startTime = Date.now();
             try {
                 console.log(`[LLM Waterfall] Attempting ${model.id} (${model.name})...`);
-                let result;
-                if (model.type === 'claude') result = await this._callClaude(prompt, model.name);
-                if (model.type === 'gemini') result = await this._callGemini(prompt, model.name);
+                
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error(`${model.id} model-level timeout (15s)`)), 15000)
+                );
+                
+                let actualCall;
+                if (model.type === 'claude') actualCall = this._callClaude(prompt, model.name);
+                if (model.type === 'gemini') actualCall = this._callGemini(prompt, model.name);
+                
+                const result = await Promise.race([actualCall, timeoutPromise]);
                 
                 this._logTelemetry(model.id, model.name, Date.now() - startTime, true);
                 return result;

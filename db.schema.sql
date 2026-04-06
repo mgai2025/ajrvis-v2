@@ -81,7 +81,7 @@ CREATE TABLE reminders (
     task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
     remind_at TIMESTAMP WITH TIME ZONE NOT NULL,
     type VARCHAR CHECK (type IN ('pre', 'exact', 'followup', 'escalation')) DEFAULT 'pre',
-    status VARCHAR CHECK (status IN ('pending', 'sent', 'cancelled')) DEFAULT 'pending',
+    status VARCHAR CHECK (status IN ('pending', 'processing', 'sent', 'cancelled')) DEFAULT 'pending',
     attempt_count INT DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

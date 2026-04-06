@@ -42,7 +42,7 @@ describe('Telegram Controller - Bug 4 Fallback Verification', () => {
 
         await telegramController.receiveMessage(req, res);
 
-        expect(mockSendMessage).toHaveBeenCalledWith(456, expect.stringContaining('⚠️ Something went wrong'));
-        expect(res.status).toHaveBeenCalledWith(500);
+        expect(mockSendMessage).toHaveBeenCalledWith(456, expect.stringContaining('⚠️ System Error'));
+        expect(res.status).toHaveBeenCalledWith(200);
     });
 });

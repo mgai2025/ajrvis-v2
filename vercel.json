@@ -1,8 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/webhook/cron/morning-brief",
-      "schedule": "0 2 * * *"
-    }
-  ]
+  "maxDuration": 60
 }

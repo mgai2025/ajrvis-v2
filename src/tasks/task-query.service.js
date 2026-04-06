@@ -8,6 +8,7 @@ class TaskQueryService {
     async queryPendingTasks(user) {
         if (!user || (!user.id && !user.user_id)) return "User ID not found.";
         const userId = user.id || user.user_id;
+        const timeZone = (user.settings && user.settings.timezone) ? user.settings.timezone : 'Asia/Kolkata';
 
         try {
             const allTasks = await taskService.getUserTasks(userId);
@@ -30,7 +31,7 @@ class TaskQueryService {
             if (myTasks.length > 0) {
                 msg += `📋 *MY TASKS:*\n`;
                 myTasks.forEach(t => {
-                    const dueStr = t.due_date ? ` — due ${this._formatUrgency(t.due_date)}` : '';
+                    const dueStr = t.due_date ? ` — due ${this._formatUrgency(t.due_date, timeZone)}` : '';
                     msg += `  ${counter}. ${t.title}${dueStr}\n`;
                     counter++;
                 });
@@ -52,7 +53,7 @@ class TaskQueryService {
                 msg += `📥 *ASSIGNED TO ME* (by others):\n`;
                 assigned.forEach(t => {
                     const ownerName = (t.owner && t.owner.name) ? t.owner.name : 'Someone';
-                    const dueStr = t.due_date ? ` — due ${this._formatUrgency(t.due_date)}` : '';
+                    const dueStr = t.due_date ? ` — due ${this._formatUrgency(t.due_date, timeZone)}` : '';
                     msg += `  ${counter}. ${t.title} ← ${ownerName}${dueStr}\n`;
                     counter++;
                 });
@@ -137,36 +138,50 @@ class TaskQueryService {
         };
     }
 
-    _formatUrgency(isoString) {
+    _formatUrgency(isoString, timeZone = 'Asia/Kolkata') {
         const due = new Date(isoString);
         const now = new Date();
-        const startOfToday = new Date(now); startOfToday.setHours(0,0,0,0);
-        const endOfToday = new Date(now); endOfToday.setHours(23,59,59,999);
-        const startOfTomorrow = new Date(now); startOfTomorrow.setDate(startOfTomorrow.getDate() + 1); startOfTomorrow.setHours(0,0,0,0);
-        const endOfTomorrow = new Date(startOfTomorrow); endOfTomorrow.setHours(23,59,59,999);
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const getLocaleDate = (d) => d.toLocaleDateString('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' });
 
         if (due < now) return '*OVERDUE*';
-        if (due >= startOfToday && due <= endOfToday) return `today at ${this._formatTime(isoString)}`;
-        if (due >= startOfTomorrow && due <= endOfTomorrow) return `tomorrow at ${this._formatTime(isoString)}`;
-        return this._formatDate(isoString);
+        if (getLocaleDate(due) === getLocaleDate(now)) return `today at ${this._formatTime(isoString, timeZone)}`;
+        if (getLocaleDate(due) === getLocaleDate(tomorrow)) return `tomorrow at ${this._formatTime(isoString, timeZone)}`;
+        return this._formatDate(isoString, timeZone);
+    }
+
+    /**
+     * Helper to get user-local date parts
+     */
+    _getUserLocalTimeParts(dateObj, timeZone) {
+        const formatter = new Intl.DateTimeFormat('en-US', { timeZone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' });
+        const parts = formatter.formatToParts(dateObj);
+        const p = {};
+        parts.forEach(part => p[part.type] = part.value);
+        return {
+            dateStr: `${p.year}-${p.month}-${p.day}`,
+            hour: parseInt(p.hour, 10),
+            dayOfMonth: parseInt(p.day, 10)
+        };
     }
 
     /**
      * BUG-006 FIX: Morning Brief Builder
-     * Called by morning-brief.service.js every morning at 7:30 AM.
      * Returns a rich, concise morning message for the primary user.
      */
     async buildMorningBrief(user) {
         const userId = user.id || user.user_id;
         const name = user.name || 'there';
+        const timeZone = (user.settings && user.settings.timezone) ? user.settings.timezone : 'Asia/Kolkata';
         const now = new Date();
-        const today = now.toDateString();
+        const localNow = this._getUserLocalTimeParts(now, timeZone);
 
         let sections = [];
 
         // 1. Greeting
-        const hour = now.getHours();
-        const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+        const greeting = localNow.hour < 12 ? 'Good morning' : localNow.hour < 17 ? 'Good afternoon' : 'Good evening';
         sections.push(`${greeting} ${name}! ☀️ Here's your daily brief:\n`);
 
         // 2. Today's tasks + overdue
@@ -175,7 +190,11 @@ class TaskQueryService {
             const active = (allTasks || []).filter(t => t.status === 'scheduled' || t.status === 'in_progress');
 
             const overdue = active.filter(t => new Date(t.due_date) < now);
-            const todayTasks = active.filter(t => new Date(t.due_date).toDateString() === today && new Date(t.due_date) >= now);
+            const todayTasks = active.filter(t => {
+                const isOverdue = new Date(t.due_date) < now;
+                const taskLocal = this._getUserLocalTimeParts(new Date(t.due_date), timeZone);
+                return !isOverdue && taskLocal.dateStr === localNow.dateStr;
+            });
 
             if (overdue.length > 0) {
                 sections.push(`🛑 *OVERDUE (${overdue.length} items):*`);
@@ -185,7 +204,7 @@ class TaskQueryService {
 
             if (todayTasks.length > 0) {
                 sections.push(`📅 *TODAY:*`);
-                todayTasks.slice(0, 5).forEach(t => sections.push(`  • ${t.title} (by ${this._formatTime(t.due_date)})`));
+                todayTasks.slice(0, 5).forEach(t => sections.push(`  • ${t.title} (by ${this._formatTime(t.due_date, timeZone)})`));
             }
 
             if (overdue.length === 0 && todayTasks.length === 0) {
@@ -196,8 +215,7 @@ class TaskQueryService {
         }
 
         // 3. Month-end salary prompt (if 28th-31st of month)
-        const dayOfMonth = now.getDate();
-        if (dayOfMonth >= 28) {
+        if (localNow.dayOfMonth >= 28) {
             sections.push(`\n💰 *Month-End Reminder:* Run "calculate salary" for your helpers for this month.`);
         }
 
@@ -206,20 +224,14 @@ class TaskQueryService {
         return sections.join('\n');
     }
 
-    _formatTime(isoString) {
+    _formatTime(isoString, timeZone = 'Asia/Kolkata') {
         const d = new Date(isoString);
-        let hours = d.getHours();
-        let minutes = d.getMinutes();
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        hours = hours % 12;
-        hours = hours ? hours : 12; // the hour '0' should be '12'
-        minutes = minutes < 10 ? '0' + minutes : minutes;
-        return `${hours}:${minutes} ${ampm}`;
+        return d.toLocaleString('en-IN', { timeZone, hour: '2-digit', minute: '2-digit' });
     }
 
-    _formatDate(isoString) {
+    _formatDate(isoString, timeZone = 'Asia/Kolkata') {
         const d = new Date(isoString);
-        return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        return d.toLocaleDateString('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric' });
     }
 }
 

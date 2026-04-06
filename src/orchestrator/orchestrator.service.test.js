@@ -20,21 +20,26 @@ jest.mock('../tasks/task.service', () => ({
 
 // More robust Supabase mock
 jest.mock('../shared/db', () => {
-    const mockFrom = jest.fn().mockReturnThis();
-    const mockUpdate = jest.fn().mockReturnThis();
-    const mockEq = jest.fn().mockReturnThis();
-    const mockSelect = jest.fn().mockReturnThis();
+    const chainable = {};
+    chainable.from = jest.fn().mockReturnValue(chainable);
+    chainable.update = jest.fn().mockReturnValue(chainable);
+    chainable.eq = jest.fn().mockReturnValue(chainable);
+    chainable.select = jest.fn().mockReturnValue(chainable);
+    chainable.single = jest.fn().mockReturnValue(chainable);
+    chainable.limit = jest.fn().mockReturnValue(chainable);
+    chainable.in = jest.fn().mockReturnValue(chainable);
+    chainable.gte = jest.fn().mockReturnValue(chainable);
+    chainable.order = jest.fn().mockReturnValue(chainable);
+    chainable.delete = jest.fn().mockReturnValue(chainable);
+    chainable.insert = jest.fn().mockReturnValue(chainable);
+    chainable.or = jest.fn().mockReturnValue(chainable);
+    chainable.lt = jest.fn().mockReturnValue(chainable);
     
     return {
-        supabase: {
-            from: mockFrom,
-            update: mockUpdate,
-            eq: mockEq,
-            select: mockSelect
-        },
+        supabase: chainable,
         executeDbQuery: jest.fn(async (q) => {
-            if (typeof q === 'object' && q !== null) return []; // return empty data
-            return q;
+            // Return empty arrays or objects to avoid destructuring errors
+            return []; 
         })
     };
 });

@@ -52,11 +52,7 @@ const verifyCronSecret = (req, res, next) => {
 router.all('/cron/heartbeat', verifyCronSecret, async (req, res) => {
     res.status(200).json({ status: 'ok', triggered: 'heartbeat' });
     await reminderService.processOverdueReminders();
-});
-
-router.all('/cron/morning-brief', verifyCronSecret, async (req, res) => {
-    res.status(200).json({ status: 'ok', triggered: 'morning-brief' });
-    await morningBriefService.executeDailyBrief();
+    await morningBriefService.processGlobalMorningBriefs();
 });
 
 module.exports = router;
