@@ -50,9 +50,14 @@ const verifyCronSecret = (req, res, next) => {
 };
 
 router.all('/cron/heartbeat', verifyCronSecret, async (req, res) => {
-    res.status(200).json({ status: 'ok', triggered: 'heartbeat' });
-    await reminderService.processOverdueReminders();
-    await morningBriefService.processGlobalMorningBriefs();
+    try {
+        await reminderService.processOverdueReminders();
+        await morningBriefService.processGlobalMorningBriefs();
+        res.status(200).json({ status: 'ok', triggered: 'heartbeat' });
+    } catch (error) {
+        console.error('[Cron Error] Heartbeat failed:', error);
+        res.status(500).json({ status: 'failed', error: error.message });
+    }
 });
 
 module.exports = router;
