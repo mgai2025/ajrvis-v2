@@ -19,13 +19,12 @@ class ReminderService {
             const nowISO = new Date().toISOString();
             
             // Step 1: Find Active or Zombie Reminders
-            const { data: pendingReminders, error } = await supabase
+            const pendingReminders = await executeDbQuery(supabase
                 .from('reminders')
                 .select('*, tasks(title, description, user_id, status)')
                 .or(`status.eq.pending,and(status.eq.processing,locked_until.lt.${nowISO})`)
-                .lte('remind_at', nowISO);
+                .lte('remind_at', nowISO));
 
-            if (error) throw error;
             if (!pendingReminders || pendingReminders.length === 0) return;
 
             // BUG-014 FIX: Deduplicate redundant backlog reminders
@@ -53,7 +52,7 @@ class ReminderService {
 
             // Auto-Cancel Redundant Reminders & Log Analytics
             if (redundantReminderIds.length > 0) {
-                await supabase.from('reminders').update({ status: 'cancelled', locked_until: null }).in('id', redundantReminderIds);
+                await executeDbQuery(supabase.from('reminders').update({ status: 'cancelled', locked_until: null }).in('id', redundantReminderIds));
                 const logEntries = redundantReminderIds.map(id => ({
                     entity_type: 'reminder',
                     entity_id: id,
@@ -61,7 +60,7 @@ class ReminderService {
                     actor: 'system',
                     metadata: { reason: "superseded due to redundancy which happened due to reminders not sent earlier and pending many tasks together" }
                 }));
-                await supabase.from('activity_log').insert(logEntries);
+                await executeDbQuery(supabase.from('activity_log').insert(logEntries));
             }
 
             if (activeReminders.length === 0) return;
@@ -70,7 +69,7 @@ class ReminderService {
             const reminderIds = activeReminders.map(r => r.id);
             const lockExpirationDate = new Date(Date.now() + 120000).toISOString(); // +2 minutes
             
-            const { data: grabbedReminders, error: lockError } = await supabase
+            const grabbedReminders = await executeDbQuery(supabase
                 .from('reminders')
                 .update({ 
                     status: 'processing', 
@@ -78,9 +77,8 @@ class ReminderService {
                 })
                 .in('id', reminderIds)
                 .or(`status.eq.pending,locked_until.lt.${nowISO}`)
-                .select('*, tasks(title, description, user_id, status)'); // return successfully locked rows
+                .select('*, tasks(title, description, user_id, status)')); // return successfully locked rows
 
-            if (lockError) throw lockError;
             if (!grabbedReminders || grabbedReminders.length === 0) return; // Another worker stole all of them
 
             for (const reminder of grabbedReminders) {
@@ -104,7 +102,7 @@ class ReminderService {
         try {
             // Fetch User Phone Target
             const task = reminder.tasks;
-            const { data: user } = await supabase.from('users').select('phone').eq('id', task.user_id).single();
+            const user = await executeDbQuery(supabase.from('users').select('phone').eq('id', task.user_id).single());
             if (!user) {
                 return await this.markReminderStatus(reminder.id, 'cancelled');
             }
@@ -130,14 +128,14 @@ class ReminderService {
             if (newAttemptCount >= CONSTANTS.SCHEDULER.MAX_FOLLOWUPS && reminder.type !== 'escalation') {
                 // S-007 / T-006 ESCALATE
                 console.log(`[Scheduler] Reminder ${reminder.id} hit max followups. Escalating...`); // We will add escalation logic later
-                await supabase.from('tasks').update({ status: 'escalated' }).eq('id', reminder.task_id);
+                await executeDbQuery(supabase.from('tasks').update({ status: 'escalated' }).eq('id', reminder.task_id));
                 await this.markReminderStatus(reminder.id, 'cancelled'); // Kill this loop since task is escalated
             } else {
-                await supabase.from('reminders').update({
+                await executeDbQuery(supabase.from('reminders').update({
                     status: 'sent',
                     locked_until: null,
                     attempt_count: newAttemptCount
-                }).eq('id', reminder.id);
+                }).eq('id', reminder.id));
             }
 
         } catch (error) {
@@ -152,7 +150,7 @@ class ReminderService {
      */
     async markReminderStatus(reminderId, status) {
         if (!supabase) return;
-        return await supabase.from('reminders').update({ status, locked_until: null }).eq('id', reminderId);
+        return await executeDbQuery(supabase.from('reminders').update({ status, locked_until: null }).eq('id', reminderId));
     }
 }
 

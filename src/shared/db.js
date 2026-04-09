@@ -29,6 +29,10 @@ const executeDbQuery = async (queryPromise) => {
     const { data, error } = await queryPromise;
     if (error) {
         console.error('Database Error:', error.message, error.details);
+        if (error.message && error.message.includes('schema cache')) {
+            // BUG-024 FIX: Catch PostgREST Schema Cache mismatches and provide a user-friendly fallback
+            throw new Error('System database is currently synchronizing updates. Please wait a minute and try again.');
+        }
         throw error;
     }
     return data;
