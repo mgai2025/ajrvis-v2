@@ -156,7 +156,7 @@ class TaskQueryService {
      * Helper to get user-local date parts
      */
     _getUserLocalTimeParts(dateObj, timeZone) {
-        const formatter = new Intl.DateTimeFormat('en-US', { timeZone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' });
+        const formatter = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' });
         const parts = formatter.formatToParts(dateObj);
         const p = {};
         parts.forEach(part => p[part.type] = part.value);

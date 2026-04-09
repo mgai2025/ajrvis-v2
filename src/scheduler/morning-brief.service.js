@@ -24,7 +24,7 @@ class MorningBriefService {
                 const briefHour = parseInt(settings.morning_brief_time || '7', 10);
 
                 // Safely extract the user's localized date and hour
-                const formatter = new Intl.DateTimeFormat('en-US', { timeZone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' });
+                const formatter = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' });
                 const parts = formatter.formatToParts(now);
                 const p = {};
                 parts.forEach(part => p[part.type] = part.value);
