@@ -16,11 +16,14 @@ class ReminderService {
 
         try {
             console.log('[Scheduler] Checking for pending reminders...');
+            const nowISO = new Date().toISOString();
+            
+            // Step 1: Find Active or Zombie Reminders
             const { data: pendingReminders, error } = await supabase
                 .from('reminders')
                 .select('*, tasks(title, description, user_id, status)')
-                .eq('status', 'pending')
-                .lte('remind_at', new Date().toISOString());
+                .or(`status.eq.pending,and(status.eq.processing,locked_until.lt.${nowISO})`)
+                .lte('remind_at', nowISO);
 
             if (error) throw error;
             if (!pendingReminders || pendingReminders.length === 0) return;
@@ -50,7 +53,7 @@ class ReminderService {
 
             // Auto-Cancel Redundant Reminders & Log Analytics
             if (redundantReminderIds.length > 0) {
-                await supabase.from('reminders').update({ status: 'cancelled' }).in('id', redundantReminderIds);
+                await supabase.from('reminders').update({ status: 'cancelled', locked_until: null }).in('id', redundantReminderIds);
                 const logEntries = redundantReminderIds.map(id => ({
                     entity_type: 'reminder',
                     entity_id: id,
@@ -63,12 +66,25 @@ class ReminderService {
 
             if (activeReminders.length === 0) return;
 
-            // BUG-013 FIX: Lock-Then-Send on only the active ones
+            // Step 2: Atomic Lease Locking (Self-Healing)
             const reminderIds = activeReminders.map(r => r.id);
-            await supabase.from('reminders').update({ status: 'processing' }).in('id', reminderIds);
+            const lockExpirationDate = new Date(Date.now() + 120000).toISOString(); // +2 minutes
+            
+            const { data: grabbedReminders, error: lockError } = await supabase
+                .from('reminders')
+                .update({ 
+                    status: 'processing', 
+                    locked_until: lockExpirationDate 
+                })
+                .in('id', reminderIds)
+                .or(`status.eq.pending,locked_until.lt.${nowISO}`)
+                .select('*, tasks(title, description, user_id, status)'); // return successfully locked rows
 
-            for (const reminder of activeReminders) {
-                // Double check if task is already completed (in case reminders didn't cancel cleanly)
+            if (lockError) throw lockError;
+            if (!grabbedReminders || grabbedReminders.length === 0) return; // Another worker stole all of them
+
+            for (const reminder of grabbedReminders) {
+                // Double check if task is already completed
                 if (!reminder.tasks || reminder.tasks.status === 'completed') {
                     await this.markReminderStatus(reminder.id, 'cancelled');
                     continue;
@@ -119,6 +135,7 @@ class ReminderService {
             } else {
                 await supabase.from('reminders').update({
                     status: 'sent',
+                    locked_until: null,
                     attempt_count: newAttemptCount
                 }).eq('id', reminder.id);
             }
@@ -135,7 +152,7 @@ class ReminderService {
      */
     async markReminderStatus(reminderId, status) {
         if (!supabase) return;
-        return await supabase.from('reminders').update({ status }).eq('id', reminderId);
+        return await supabase.from('reminders').update({ status, locked_until: null }).eq('id', reminderId);
     }
 }
 
