@@ -10,9 +10,10 @@ class Orchestrator {
      * Primary entry point for all normalized messages
      */
     async routeMessage(inputEvent) {
+        const timeoutMs = process.env.ORCHESTRATOR_TIMEOUT_MS ? parseInt(process.env.ORCHESTRATOR_TIMEOUT_MS, 10) : 50000;
         return Promise.race([
             this._routeMessageInternal(inputEvent),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Orchestrator Timeout: Engine took longer than 50s')), 50000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error(`Orchestrator Timeout: Engine took longer than ${timeoutMs}ms`)), timeoutMs))
         ]);
     }
 

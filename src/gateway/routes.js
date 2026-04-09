@@ -51,8 +51,8 @@ const verifyCronSecret = (req, res, next) => {
 
 router.all('/cron/heartbeat', verifyCronSecret, async (req, res) => {
     try {
-        await reminderService.processOverdueReminders();
         await morningBriefService.processGlobalMorningBriefs();
+        await reminderService.processOverdueReminders();
         res.status(200).json({ status: 'ok', triggered: 'heartbeat' });
     } catch (error) {
         console.error('[Cron Error] Heartbeat failed:', error);
