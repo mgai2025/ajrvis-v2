@@ -76,7 +76,9 @@ class Orchestrator {
 
         // 4. Intent Classification (Hop 1: The Token Saver)
         let intentResult = await llm.classifyIntent(inputEvent.raw_text, {
-            name: user.name
+            name: user.name,
+            children: user.children || [],
+            providers: user.service_providers || []
         });
 
         // 5. Context Retrieval Fallback (Hop 2: Intelligence Layer)

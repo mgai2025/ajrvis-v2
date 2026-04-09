@@ -12,7 +12,7 @@ class UserService {
         if (!supabase) return this._mockGetUser(phone);
         
         const data = await executeDbQuery(
-            supabase.from('users').select('*').eq('phone', phone).maybeSingle()
+            supabase.from('users').select('*, children(name), service_providers(name, role)').eq('phone', phone).maybeSingle()
         );
         return data;
     }
