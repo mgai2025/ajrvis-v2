@@ -80,9 +80,10 @@ const receiveMessage = async (req, res) => {
             // Send response back via Telegram
             if (responseText) {
                 let msgText = typeof responseText === 'string' ? responseText : responseText.text;
-                let msgOpts = typeof responseText === 'string' ? { parse_mode: 'Markdown' } : (responseText.options || { parse_mode: 'Markdown' });
-                // ensure Markdown mode is kept
-                if(!msgOpts.parse_mode) msgOpts.parse_mode = 'Markdown';
+                let msgOpts = typeof responseText === 'string' ? {} : (responseText.options || {});
+                
+                // Only pass parse_mode if it's explicitly set by options. 
+                // Do not guess 'Markdown'.
                 
                 try {
                     await bot.sendMessage(message.chat.id, msgText, msgOpts);
@@ -98,13 +99,15 @@ const receiveMessage = async (req, res) => {
                             const { executeDbQuery, supabase } = require('../shared/db');
                             if (supabase) {
                                 await executeDbQuery(supabase.from('activity_log').insert({
-                                    user_id: null, // Allow null for system-wide delivery failures
-                                    entity_type: 'system',
+                                    user_id: null,
+                                    entity_type: 'user',
                                     action: 'delivery_failed',
                                     metadata: { error: fallbackError.message, phone: inputEvent.user_phone }
                                 }));
                             }
-                        } catch(e) {} // Don't crash the controller if DB logging fails
+                        } catch(e) {
+                            console.error('[Telegram] FATAL: DB logging for delivery failure also failed!', e.message);
+                        }
                     }
                 }
             }
