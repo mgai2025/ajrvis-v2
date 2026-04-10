@@ -295,16 +295,37 @@ class Orchestrator {
 
                 // Heuristic 2: They gave a text title instead of a number
                 if (!targetTaskId && completedTaskTitle && typeof completedTaskTitle === 'string') {
+                    // Try to find a pending match first
                     const pending = await taskService.getUserTasks(user.id);
-                    const match = pending.find(t => t.title.toLowerCase().includes(completedTaskTitle.toLowerCase()) && t.status !== 'completed');
-                    if (match) {
-                        targetTaskId = match.id;
-                        targetTitle = match.title;
+                    const pendingMatch = pending.find(t => t.title.toLowerCase().includes(completedTaskTitle.toLowerCase()) && t.status !== 'completed');
+                    
+                    if (pendingMatch) {
+                        targetTaskId = pendingMatch.id;
+                        targetTitle = pendingMatch.title;
+                    } else {
+                        // Fallback: Check if it was already completed recently
+                        const { executeDbQuery, supabase } = require('../shared/db');
+                        if (supabase) {
+                            const completedMatch = await executeDbQuery(
+                                supabase.from('tasks').select('*')
+                                    .eq('user_id', user.id)
+                                    .eq('status', 'completed')
+                                    .ilike('title', `%${completedTaskTitle}%`)
+                                    .order('updated_at', { ascending: false })
+                                    .limit(1)
+                            );
+                            if (completedMatch && completedMatch.length > 0) {
+                                msg = `Wait, you already finished "${completedMatch[0].title}" earlier! It's already checked off.`;
+                                targetTaskId = 'ALREADY_DONE'; // Signal to skip real completion logic
+                            }
+                        }
                     }
                 }
 
                 // Execute Completion
-                if (targetTaskId) {
+                if (targetTaskId === 'ALREADY_DONE') {
+                    // message already set above
+                } else if (targetTaskId) {
                     const finishResult = await taskService.markTaskCompleted(targetTaskId, user.id);
                     if (finishResult.success) {
                         msg = `✅ Marked "${targetTitle}" as completed. Good job!`;

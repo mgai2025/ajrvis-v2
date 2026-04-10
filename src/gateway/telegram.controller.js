@@ -94,6 +94,17 @@ const receiveMessage = async (req, res) => {
                         await bot.sendMessage(message.chat.id, msgText, msgOpts);
                     } catch (fallbackError) {
                         console.error('[Telegram] Plain text fallback also failed:', fallbackError.message);
+                        try {
+                            const { executeDbQuery, supabase } = require('../shared/db');
+                            if (supabase) {
+                                await executeDbQuery(supabase.from('activity_log').insert({
+                                    user_id: null, // Allow null for system-wide delivery failures
+                                    entity_type: 'system',
+                                    action: 'delivery_failed',
+                                    metadata: { error: fallbackError.message, phone: inputEvent.user_phone }
+                                }));
+                            }
+                        } catch(e) {} // Don't crash the controller if DB logging fails
                     }
                 }
             }
