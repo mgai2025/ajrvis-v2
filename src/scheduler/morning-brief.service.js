@@ -38,11 +38,15 @@ class MorningBriefService {
 
                         const briefMsg = await taskQueryService.buildMorningBrief(user);
                         if (briefMsg) {
-                            await outboundAdapter.sendMessage(user.phone, briefMsg);
+                            try {
+                                await outboundAdapter.sendMessage(user.phone, briefMsg);
+                                // ONLY update last_morning_brief_date if send succeeded
+                                settings.last_morning_brief_date = localDateStr;
+                                await supabase.from('users').update({ settings }).eq('id', user.id);
+                            } catch (sendErr) {
+                                console.error(`[MorningBrief] Failed to send brief to user ${user.id}:`, sendErr.message);
+                            }
                         }
-
-                        settings.last_morning_brief_date = localDateStr;
-                        await supabase.from('users').update({ settings }).eq('id', user.id);
                     }
                 }
             }

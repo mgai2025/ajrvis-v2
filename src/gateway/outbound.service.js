@@ -14,8 +14,14 @@ class OutboundAdapter {
                 // Route to Telegram
                 const chatId = userPhone.replace('TG-', '');
                 if (telegramController.bot) {
-                    await telegramController.bot.sendMessage(chatId, text);
-                    console.log(`[Outbound] Sent Telegram to ${userPhone}: ${text.substring(0, 30)}...`);
+                    try {
+                        await telegramController.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+                        console.log(`[Outbound] Sent Telegram to ${userPhone}: ${text.substring(0, 30)}...`);
+                    } catch (sendError) {
+                        console.error('[Outbound] Markdown send failed, falling back to plain text:', sendError.message);
+                        await telegramController.bot.sendMessage(chatId, text);
+                        console.log(`[Outbound] Sent Plain Text Telegram to ${userPhone}: ${text.substring(0, 30)}...`);
+                    }
                 } else {
                     console.warn('[Outbound] Telegram bot is not initialized. Message dropped.');
                 }

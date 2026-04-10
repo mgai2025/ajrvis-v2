@@ -83,7 +83,19 @@ const receiveMessage = async (req, res) => {
                 let msgOpts = typeof responseText === 'string' ? { parse_mode: 'Markdown' } : (responseText.options || { parse_mode: 'Markdown' });
                 // ensure Markdown mode is kept
                 if(!msgOpts.parse_mode) msgOpts.parse_mode = 'Markdown';
-                await bot.sendMessage(message.chat.id, msgText, msgOpts);
+                
+                try {
+                    await bot.sendMessage(message.chat.id, msgText, msgOpts);
+                } catch (sendError) {
+                    console.error('[Telegram] Markdown send failed! Falling back to plain text. Error:', sendError.message);
+                    // Fallback to plain text (stripping parse_mode)
+                    delete msgOpts.parse_mode;
+                    try {
+                        await bot.sendMessage(message.chat.id, msgText, msgOpts);
+                    } catch (fallbackError) {
+                        console.error('[Telegram] Plain text fallback also failed:', fallbackError.message);
+                    }
+                }
             }
         }
         // Acknowledge completely at the END so the Lambda stays alive
