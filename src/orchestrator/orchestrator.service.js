@@ -294,18 +294,14 @@ class Orchestrator {
                     }
                 } else {
                     msg = `I'd love to block that for you, but your Google Calendar isn't linked yet. 📅\n\nLink it securely here:`;
-                    const redirectUrl = process.env.GOOGLE_REDIRECT_URL;
-                    if (redirectUrl) {
-                        opts = {
-                            reply_markup: {
-                                inline_keyboard: [
-                                    [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${user.id}` }]
-                                ]
-                            }
-                        };
-                    } else {
-                        msg += "\n\n⚠️ (Setup Error: Google Redirect URL is not configured in settings. Please contact support.)";
-                    }
+                    const redirectUrl = process.env.GOOGLE_REDIRECT_URL || 'https://ajrvis-v2.vercel.app/api/auth/google/callback';
+                    opts = {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${user.id}` }]
+                            ]
+                        }
+                    };
                 }
             } else if (intentResult.intent === 'query_tasks') {
                 const taskQueryService = require('../tasks/task-query.service');
@@ -387,18 +383,14 @@ class Orchestrator {
                     msg = `Your Google Calendar is already successfully connected. 📅\nI'll continue syncing your important tasks and school events automatically.`;
                 } else {
                     msg = `I can automatically add important tasks and events to your Google Calendar. 📅\n\nLink your account securely below:`;
-                    const redirectUrl = process.env.GOOGLE_REDIRECT_URL;
-                    if (redirectUrl) {
-                        opts = {
-                            reply_markup: {
-                                inline_keyboard: [
-                                    [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${user.id}` }]
-                                ]
-                            }
-                        };
-                    } else {
-                        msg += "\n\n⚠️ (Setup Error: Google Redirect URL is not configured in settings. Please contact support.)";
-                    }
+                    const redirectUrl = process.env.GOOGLE_REDIRECT_URL || 'https://ajrvis-v2.vercel.app/api/auth/google/callback';
+                    opts = {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${user.id}` }]
+                            ]
+                        }
+                    };
                 }
             } else if (intentResult.intent === 'update_settings') {
                 const settingName = intentResult.entities.setting_name;
