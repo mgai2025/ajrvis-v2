@@ -113,14 +113,16 @@ class SchoolService {
             finalMessage += `\n\n📅 _Event added to your Google Calendar._`;
         } else if (gcalResponse && gcalResponse.reason === 'not_connected') {
             finalMessage += `\n\n_Tip: I can automatically add this to your Google Calendar. Link your account below:_`;
-            const redirectUrl = process.env.GOOGLE_REDIRECT_URL || 'https://ajrvis-v2.vercel.app/api/auth/google/callback';
-            responseOptions = {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${userId}` }]
-                    ]
-                }
-            };
+            const redirectUrl = process.env.GOOGLE_REDIRECT_URL;
+            if (redirectUrl) {
+                responseOptions = {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${userId}` }]
+                        ]
+                    }
+                };
+            }
         }
 
         return { 
