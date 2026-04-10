@@ -116,9 +116,11 @@ CURRENT UTC TIME: ${new Date().toISOString()}
 USER TIMEZONE: ${userContext.settings?.timezone || 'Asia/Kolkata'}
 ${historyBlock}
 
-VALID INTENTS: create_task | create_event | add_provider | provider_exception | delegate_provider_task | delegate_task | provider_advance | calculate_salary | school_event | complex_goal | query_tasks | query_providers | approve_action | reject_action | cancel_task | update_settings | conversational | out_of_scope
+VALID INTENTS: create_task | create_event | add_provider | provider_exception | delegate_provider_task | delegate_task | provider_advance | calculate_salary | school_event | complex_goal | query_tasks | query_providers | approve_action | reject_action | cancel_task | update_settings | calendar_link | calendar_sync | conversational | out_of_scope
 
 INTENT MAPPING RULES:
+- 'calendar_link': Use when user asks to connect, link, or sync their google calendar.
+- 'calendar_sync': Use when user asks to push or sync existing tasks to their calendar.
 - 'delegate_provider_task': Use when telling a domestic worker to do something (e.g. "Tell cook to make pasta").
 - 'delegate_task': Use strictly when assigning a personal task to a family member or spouse (e.g. "Ask Mohit to pick up Kynaa", "Tell Rahul to pay rent").
 - 'school_event': Strictly for administrative school tracking (e.g. exams, parent-teacher meetings, school fees). DO NOT use for birthdays or parties.

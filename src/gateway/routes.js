@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const whatsappController = require('./whatsapp.controller');
 const telegramController = require('./telegram.controller');
+const googleAuthController = require('./google-auth.controller');
+const gmailWebhookController = require('./gmail-webhook.controller');
 
 // Meta Webhook Verification
 router.get('/whatsapp', whatsappController.verifyWebhook);
@@ -16,6 +18,13 @@ router.post(
 // Telegram Webhook
 router.post('/telegram', telegramController.receiveMessage);
 router.post('/telegram/set-webhook', telegramController.setWebhook);
+
+// Google OAuth Webhook
+router.get('/auth/google', (req, res) => googleAuthController.startAuthFlow(req, res));
+router.get('/auth/google/callback', (req, res) => googleAuthController.handleCallback(req, res));
+
+// Gmail Push Webhook
+router.post('/gmail-webhook', gmailWebhookController.receiveWebhook);
 
 // Config API
 const configService = require('../config/config.service');

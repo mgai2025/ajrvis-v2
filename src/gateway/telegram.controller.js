@@ -79,11 +79,15 @@ const receiveMessage = async (req, res) => {
 
             // Send response back via Telegram
             if (responseText) {
-                await bot.sendMessage(message.chat.id, responseText);
+                let msgText = typeof responseText === 'string' ? responseText : responseText.text;
+                let msgOpts = typeof responseText === 'string' ? { parse_mode: 'Markdown' } : (responseText.options || { parse_mode: 'Markdown' });
+                // ensure Markdown mode is kept
+                if(!msgOpts.parse_mode) msgOpts.parse_mode = 'Markdown';
+                await bot.sendMessage(message.chat.id, msgText, msgOpts);
             }
         }
         // Acknowledge completely at the END so the Lambda stays alive
-        return res.status(200).json({ status: 'SUCCESS', message: responseText });
+        return res.status(200).json({ status: 'SUCCESS' });
     } catch (error) {
         console.error('Error processing Telegram webhook payload:', error);
         if (bot && req.body && req.body.message && req.body.message.chat) {

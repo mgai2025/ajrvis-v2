@@ -158,6 +158,7 @@ class Orchestrator {
         for (let i = 0; i < intentsToProcess.length; i++) {
             const intentResult = intentsToProcess[i];
             let msg = '';
+            let opts = null;
 
             if (intentResult.intent === 'complex_goal' || (intentResult.entities && intentResult.entities.needs_decomposition)) {
                 console.log(`[Orchestrator] Complex Goal detected! Handing over to GoalEngine Phase 1...`);
@@ -223,6 +224,7 @@ class Orchestrator {
 
                 const result = await schoolService.logEvent(user.id, childName, eventType, title, dateStr);
                 msg = result.message;
+                if (result.options) opts = result.options;
             } else if (intentResult.intent === 'delegate_provider_task') {
                 const providerName = intentResult.entities.provider_name;
                 const taskTitle = intentResult.entities.title;
@@ -319,6 +321,20 @@ class Orchestrator {
                         msg = "I couldn't figure out exactly which task you finished. Can you try saying the specific title or its exact number from your tasks list?";
                     }
                 }
+            } else if (intentResult.intent === 'calendar_link') {
+                const gcalSettings = user.settings?.gcal || {};
+                if (gcalSettings.connected) {
+                    msg = `Your Google Calendar is already successfully connected. 📅\nI'll continue syncing your important tasks and school events automatically.`;
+                } else {
+                    msg = `I can automatically add important tasks and events to your Google Calendar. 📅\n\nLink your account securely below:`;
+                    opts = {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '🔗 Connect Google Calendar', url: `${process.env.GOOGLE_REDIRECT_URL.replace('/callback', '')}?user_id=${user.id}` }]
+                            ]
+                        }
+                    };
+                }
             } else if (intentResult.intent === 'update_settings') {
                 const settingName = intentResult.entities.setting_name;
                 const settingValue = intentResult.entities.setting_value;
@@ -338,10 +354,22 @@ class Orchestrator {
                 msg = `I understood this as: ${intentResult.intent}. (Execution engine pending module implementations!)`;
             }
 
-            if (msg) msgArray.push(msg);
+            if (msg) {
+                msgArray.push({ text: msg, options: opts });
+            }
         } // End of Multi-Intent Loop
 
-        const finalMsg = msgArray.join('\n\n');
+        // Merge messages and options
+        let finalMsg = '';
+        let finalOptions = null;
+        for (const out of msgArray) {
+            finalMsg += out.text + '\n\n';
+            if (out.options && (!finalOptions || Object.keys(finalOptions).length === 0)) {
+                finalOptions = out.options; // Keep the first option block found (MVP)
+            }
+        }
+        finalMsg = finalMsg.trim();
+        
         console.log(`[Response -> ${inputEvent.user_phone}]:`, finalMsg);
 
         // 8. Store Output in Conversational Memory Buffer - FIRE AND FORGET
@@ -350,7 +378,7 @@ class Orchestrator {
             confidence: topIntentResult ? topIntentResult.confidence : 0
         }).catch(console.error);
 
-        return finalMsg;
+        return finalOptions ? { text: finalMsg, options: finalOptions } : finalMsg;
     }
 }
 

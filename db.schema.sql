@@ -49,6 +49,7 @@ CREATE TABLE tasks (
     requires_approval BOOLEAN DEFAULT false,
     approval_action JSONB,
     source_channel VARCHAR DEFAULT 'whatsapp',
+    metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
