@@ -268,6 +268,45 @@ class Orchestrator {
                 } else {
                     msg = `Noted. Task "${taskData.title}" created.`;
                 }
+            } else if (intentResult.intent === 'create_event' || intentResult.intent === 'block_calendar') {
+                // SPRINT II-C: Google Calendar Event Creation
+                const gcalService = require('../integrations/google-calendar.service');
+                const gcalSettings = user.settings?.gcal || {};
+                
+                if (gcalSettings.connected) {
+                    const eventData = {
+                        summary: intentResult.entities.title || 'Untitled Event',
+                        start: { dateTime: intentResult.entities.due_date || new Date().toISOString() },
+                        end: { dateTime: new Date(new Date(intentResult.entities.due_date || new Date()).getTime() + 60*60*1000).toISOString() } // Default 1 hour
+                    };
+                    const result = await gcalService.createEvent(user.id, eventData);
+                    msg = result.success ? `✅ Event "${eventData.summary}" blocked on your Google Calendar!` : `I couldn't add that to your calendar. ${result.message}`;
+                    
+                    // IF it's a school event, also trigger school service tracking
+                    if (intentResult.entities.event_type && intentResult.entities.event_type !== 'other') {
+                        const schoolService = require('../school/school.service');
+                        await schoolService.trackSchoolEvent(user.id, {
+                            title: eventData.summary,
+                            type: intentResult.entities.event_type,
+                            date: eventData.start.dateTime
+                        });
+                        msg += `\n(Also tracked in your School Circulars module.)`;
+                    }
+                } else {
+                    msg = `I'd love to block that for you, but your Google Calendar isn't linked yet. 📅\n\nLink it securely here:`;
+                    const redirectUrl = process.env.GOOGLE_REDIRECT_URL;
+                    if (redirectUrl) {
+                        opts = {
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${user.id}` }]
+                                ]
+                            }
+                        };
+                    } else {
+                        msg += "\n\n⚠️ (Setup Error: Google Redirect URL is not configured in settings. Please contact support.)";
+                    }
+                }
             } else if (intentResult.intent === 'query_tasks') {
                 const taskQueryService = require('../tasks/task-query.service');
                 msg = await taskQueryService.queryPendingTasks(user);
@@ -348,13 +387,18 @@ class Orchestrator {
                     msg = `Your Google Calendar is already successfully connected. 📅\nI'll continue syncing your important tasks and school events automatically.`;
                 } else {
                     msg = `I can automatically add important tasks and events to your Google Calendar. 📅\n\nLink your account securely below:`;
-                    opts = {
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '🔗 Connect Google Calendar', url: `${process.env.GOOGLE_REDIRECT_URL.replace('/callback', '')}?user_id=${user.id}` }]
-                            ]
-                        }
-                    };
+                    const redirectUrl = process.env.GOOGLE_REDIRECT_URL;
+                    if (redirectUrl) {
+                        opts = {
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${user.id}` }]
+                                ]
+                            }
+                        };
+                    } else {
+                        msg += "\n\n⚠️ (Setup Error: Google Redirect URL is not configured in settings. Please contact support.)";
+                    }
                 }
             } else if (intentResult.intent === 'update_settings') {
                 const settingName = intentResult.entities.setting_name;

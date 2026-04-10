@@ -113,13 +113,16 @@ class SchoolService {
             finalMessage += `\n\n📅 _Event added to your Google Calendar._`;
         } else if (gcalResponse && gcalResponse.reason === 'not_connected') {
             finalMessage += `\n\n_Tip: I can automatically add this to your Google Calendar. Link your account below:_`;
-            responseOptions = {
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🔗 Connect Google Calendar', url: `${process.env.GOOGLE_REDIRECT_URL.replace('/callback', '')}?user_id=${userId}` }]
-                    ]
-                }
-            };
+            const redirectUrl = process.env.GOOGLE_REDIRECT_URL;
+            if (redirectUrl) {
+                responseOptions = {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🔗 Connect Google Calendar', url: `${redirectUrl.replace('/callback', '')}?user_id=${userId}` }]
+                        ]
+                    }
+                };
+            }
         }
 
         return { 
@@ -127,6 +130,27 @@ class SchoolService {
             message: finalMessage,
             options: responseOptions
         };
+    }
+
+    /**
+     * Flexible wrapper for the Orchestrator to track school events
+     */
+    async trackSchoolEvent(userId, eventData) {
+        // Find child name from title if possible, or use a default
+        // For "Kynaa PTM", child name is Kynaa
+        let childName = null;
+        if (eventData.title) {
+            const match = eventData.title.match(/([A-Z][a-z]+)/); // Simple heuristic for name
+            if (match) childName = match[1];
+        }
+
+        return this.logEvent(
+            userId, 
+            childName || 'Child', 
+            eventData.type || 'other', 
+            eventData.title, 
+            eventData.date
+        );
     }
 }
 
